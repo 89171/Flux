@@ -1,0 +1,577 @@
+/**
+ * PaiNote Component Styles
+ * Layout: ActivityBar | Sidebar | Editor | AIPanel
+ * PluginMarket is a full-page view
+ */
+
+/* ============ Activity Bar (VSCode-style left icon bar) ============ */
+.activity-bar {
+  width: 48px;
+  min-width: 48px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+  gap: 4px;
+}
+
+.activity-bar-btn {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast);
+  position: relative;
+}
+
+.activity-bar-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.activity-bar-btn.active {
+  color: var(--text-primary);
+}
+
+.activity-bar-btn.active::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 24px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+}
+
+/* ============ Right Panel (AI) ============ */
+.right-panel {
+  width: 360px;
+  min-width: 360px;
+  background: var(--bg-primary);
+  border-left: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.right-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-light);
+  height: 40px;
+  min-height: 40px;
+}
+
+.right-panel-title {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
+
+.right-panel-content {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ============ Sidebar (File Explorer) ============ */
+.sidebar {
+  width: 240px;
+  min-width: 180px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  resize: horizontal;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-light);
+  height: 40px;
+  min-height: 40px;
+}
+
+.sidebar-header-title {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-tertiary);
+}
+
+.sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Explorer action icons: borderless, properly sized, perfectly centered */
+.sidebar-action-btn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  outline: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.sidebar-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sidebar-action-btn:active {
+  background: var(--bg-active);
+}
+
+.sidebar-action-btn:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.sidebar-action-btn svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+/* New File type dropdown */
+.new-file-dropdown {
+  position: fixed;
+  margin-top: 4px;
+  min-width: 180px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md, 8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  z-index: 10000;
+  padding: 4px;
+  overflow: hidden;
+}
+
+.new-file-dropdown-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.new-file-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: var(--radius-sm, 4px);
+  transition: background var(--transition-fast);
+  text-align: left;
+}
+
+.new-file-dropdown-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.new-file-dropdown-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.new-file-dropdown-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-file-dropdown-ext {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono, monospace);
+  flex-shrink: 0;
+}
+
+.sidebar-tree {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+/* ============ File Tree ============ */
+.tree-node {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: var(--font-size-base);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  margin: 0 4px;
+  transition: background var(--transition-fast);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.tree-node:hover { background: var(--bg-hover); }
+.tree-node.selected { background: var(--bg-selected); }
+
+.tree-node .tree-chevron {
+  width: 14px; height: 14px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; color: var(--text-tertiary);
+}
+.tree-node .tree-icon {
+  width: 16px; height: 16px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.tree-node .tree-label { overflow: hidden; text-overflow: ellipsis; }
+.tree-children { overflow: hidden; }
+
+/* ============ Context Menu ============ */
+.context-menu {
+  position: fixed;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  z-index: 10000;
+  min-width: 160px;
+  animation: slideUp 0.1s ease;
+}
+.context-menu-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; cursor: pointer;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-base); color: var(--text-primary);
+}
+.context-menu-item:hover { background: var(--bg-hover); }
+.context-menu-item.danger { color: #cc0000; }
+.context-menu-item.danger:hover { background: #fef0f0; }
+.context-menu-divider { height: 1px; background: var(--border-light); margin: 4px 0; }
+
+/* ============ Editor ============ */
+.editor-container {
+  flex: 1; display: flex; flex-direction: column;
+  overflow: hidden; background: var(--bg-primary);
+}
+.editor-toolbar {
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-light);
+  height: 40px; min-height: 40px;
+}
+.editor-content { flex: 1; overflow: auto; position: relative; }
+.editor-textarea {
+  width: 100%; height: 100%;
+  border: none; outline: none; resize: none;
+  padding: 32px 48px;
+  font-family: var(--font-mono); font-size: 14px; line-height: 1.7;
+  color: var(--text-primary); background: var(--bg-primary);
+}
+.editor-preview { padding: 32px 48px; max-width: 800px; margin: 0 auto; }
+.editor-empty {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  height: 100%; color: var(--text-tertiary); gap: 12px;
+}
+.editor-tab {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 12px; border-radius: var(--radius-sm);
+  cursor: pointer; font-size: var(--font-size-sm); color: var(--text-tertiary);
+}
+.editor-tab.active { background: var(--bg-active); color: var(--text-primary); }
+.editor-tab:hover:not(.active) { background: var(--bg-hover); }
+
+/* ============ AI Panel ============ */
+.ai-panel { display: flex; flex-direction: column; height: 100%; padding: 12px; gap: 10px; }
+.ai-messages { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.ai-message { padding: 10px 12px; border-radius: var(--radius-md); font-size: var(--font-size-base); line-height: 1.6; }
+.ai-message.user { background: var(--bg-tertiary); }
+.ai-message.assistant { background: var(--bg-primary); border: 1px solid var(--border-light); }
+.ai-message .role { font-size: var(--font-size-xs); font-weight: 600; color: var(--text-tertiary); margin-bottom: 4px; }
+.ai-input-area { display: flex; flex-direction: column; gap: 8px; }
+.ai-input {
+  width: 100%; min-height: 60px; max-height: 120px; resize: none;
+  border: 1px solid var(--border-color); border-radius: var(--radius-md);
+  padding: 8px 10px; font-size: var(--font-size-base); background: var(--bg-primary);
+}
+.ai-attachments { display: flex; flex-wrap: wrap; gap: 4px; }
+.ai-attachment-chip {
+  display: flex; align-items: center; gap: 4px;
+  padding: 2px 8px; background: var(--bg-tertiary);
+  border-radius: var(--radius-sm); font-size: var(--font-size-xs);
+}
+.ai-empty {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  height: 100%; color: var(--text-tertiary); text-align: center;
+  gap: 8px; padding: 20px;
+}
+
+/* ============ Plugin Market (Full Page) ============ */
+.plugin-page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+.plugin-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 32px;
+  border-bottom: 1px solid var(--border-light);
+  min-height: 60px;
+}
+
+.plugin-page-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.plugin-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.plugin-page-body {
+  flex: 1;
+  overflow: auto;
+  padding: 24px 32px;
+}
+
+.plugin-page-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.plugin-card {
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  background: var(--bg-primary);
+}
+
+.plugin-card:hover {
+  border-color: var(--border-color);
+  box-shadow: var(--shadow-sm);
+}
+
+.plugin-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.plugin-card-title { font-size: var(--font-size-lg); font-weight: 600; }
+.plugin-card-desc { font-size: var(--font-size-sm); color: var(--text-secondary); margin-bottom: 10px; line-height: 1.5; }
+.plugin-card-meta { display: flex; align-items: center; gap: 8px; font-size: var(--font-size-xs); color: var(--text-tertiary); }
+
+.plugin-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+}
+.plugin-badge.active { background: #1a1a1a; color: #fff; }
+.plugin-badge.inactive { background: var(--bg-tertiary); color: var(--text-tertiary); }
+.plugin-badge.builtin { background: var(--bg-tertiary); color: var(--text-secondary); }
+.plugin-badge.installing { background: #fff3cd; color: #856404; }
+.plugin-badge.error { background: #f8d7da; color: #721c24; }
+
+.plugin-install-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 32px;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-secondary);
+}
+
+.plugin-install-input {
+  flex: 1;
+  max-width: 400px;
+  font-size: var(--font-size-base);
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
+}
+
+/* ============ Note Window (Pinned) ============ */
+.note-window {
+  display: flex; flex-direction: column;
+  height: 100vh; width: 100vw;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(8px);
+}
+.note-window.pinned { background: rgba(255, 255, 255, 0.92); }
+.note-titlebar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 10px;
+  -webkit-app-region: drag;
+  height: 36px; min-height: 36px;
+}
+.note-titlebar-actions { display: flex; align-items: center; gap: 4px; -webkit-app-region: no-drag; }
+.note-titlebar-title {
+  font-size: var(--font-size-sm); font-weight: 500;
+  color: var(--text-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.note-content { flex: 1; overflow: auto; padding: 16px 20px; }
+
+/* ============ Opacity Slider ============ */
+.opacity-slider { display: flex; align-items: center; gap: 6px; }
+.opacity-slider input[type="range"] {
+  width: 80px; -webkit-appearance: none; height: 4px;
+  background: var(--border-color); border-radius: 2px; outline: none;
+}
+.opacity-slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 12px; height: 12px;
+  background: var(--accent); border-radius: 50%; cursor: pointer;
+}
+
+/* ============ Loading Spinner ============ */
+.spinner {
+  width: 16px; height: 16px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ============ Empty State ============ */
+.empty-state {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 40px 20px; color: var(--text-tertiary);
+  text-align: center; gap: 8px;
+}
+
+/* ============ Tiptap WYSIWYG Markdown Editor ============ */
+.markdown-editor-wrapper {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  user-select: text;
+}
+
+.markdown-editor-wrapper .tiptap-editor {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 32px 48px;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text-primary);
+}
+
+.markdown-editor-wrapper .tiptap-editor h1 { font-size: 28px; font-weight: 700; margin: 24px 0 12px; }
+.markdown-editor-wrapper .tiptap-editor h2 { font-size: 22px; font-weight: 700; margin: 20px 0 10px; }
+.markdown-editor-wrapper .tiptap-editor h3 { font-size: 18px; font-weight: 600; margin: 16px 0 8px; }
+.markdown-editor-wrapper .tiptap-editor p { margin: 8px 0; }
+.markdown-editor-wrapper .tiptap-editor ul,
+.markdown-editor-wrapper .tiptap-editor ol { margin: 8px 0; padding-left: 24px; }
+.markdown-editor-wrapper .tiptap-editor li { margin: 4px 0; }
+.markdown-editor-wrapper .tiptap-editor code {
+  background: var(--bg-tertiary); padding: 2px 6px;
+  border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 0.9em;
+}
+.markdown-editor-wrapper .tiptap-editor pre {
+  background: #1a1a1a; color: #e0e0e0; padding: 16px;
+  border-radius: var(--radius-md); overflow-x: auto; margin: 12px 0;
+}
+.markdown-editor-wrapper .tiptap-editor pre code { background: none; color: inherit; padding: 0; }
+.markdown-editor-wrapper .tiptap-editor blockquote {
+  border-left: 3px solid var(--border-color); padding-left: 16px;
+  margin: 12px 0; color: var(--text-secondary);
+}
+.markdown-editor-wrapper .tiptap-editor a { color: var(--accent-primary); text-decoration: underline; cursor: pointer; }
+.markdown-editor-wrapper .tiptap-editor table { border-collapse: collapse; margin: 12px 0; }
+.markdown-editor-wrapper .tiptap-editor th,
+.markdown-editor-wrapper .tiptap-editor td { border: 1px solid var(--border-light); padding: 8px 12px; }
+.markdown-editor-wrapper .tiptap-editor img { max-width: 100%; border-radius: var(--radius-md); }
+.markdown-editor-wrapper .tiptap-editor hr { border: none; border-top: 1px solid var(--border-light); margin: 16px 0; }
+
+/* Task list checkboxes */
+.markdown-editor-wrapper .tiptap-editor ul[data-type="taskList"] { list-style: none; padding-left: 0; }
+.markdown-editor-wrapper .tiptap-editor ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 8px; }
+.markdown-editor-wrapper .tiptap-editor ul[data-type="taskList"] li > div { flex: 1; }
+.markdown-editor-wrapper .tiptap-editor ul[data-type="taskList"] li label { margin-top: 4px; }
+.markdown-editor-wrapper .tiptap-editor ul[data-type="taskList"] li input[type="checkbox"] { cursor: pointer; }
+
+/* Placeholder */
+.markdown-editor-wrapper .tiptap-editor.tiptap-empty p:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--text-disabled);
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+
+/* ProseMirror focus outline */
+.markdown-editor-wrapper .ProseMirror { outline: none; min-height: 200px; }
+.markdown-editor-wrapper .ProseMirror p:first-child { margin-top: 0; }
+
+/* Tiptap in note window (compact) */
+.note-window .markdown-editor-wrapper .tiptap-editor {
+  padding: 16px 20px;
+  font-size: 14px;
+}

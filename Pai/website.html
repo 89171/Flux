@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PaiNote — 插件化桌面笔记</title>
+  <meta name="description" content="PaiNote 是一款插件驱动的桌面笔记应用，支持窗口置顶、AI 智能生成、多种笔记格式。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --white: #ffffff;
+      --gray-50: #fafafa;
+      --gray-100: #f5f5f5;
+      --gray-200: #e0e0e0;
+      --gray-300: #b0b0b0;
+      --gray-400: #888888;
+      --gray-500: #555555;
+      --gray-600: #333333;
+      --black: #1a1a1a;
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      --max-width: 1200px;
+      --radius: 12px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font);
+      color: var(--black);
+      background: var(--white);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: inherit; text-decoration: none; }
+    img { max-width: 100%; display: block; }
+
+    .container { max-width: var(--max-width); margin: 0 auto; padding: 0 40px; }
+
+    /* ============ Nav ============ */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(255,255,255,0.85);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--gray-200);
+    }
+    nav .container {
+      display: flex; align-items: center; justify-content: space-between;
+      height: 64px;
+    }
+    .nav-logo {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 700; font-size: 18px;
+    }
+    .nav-logo svg { width: 24px; height: 24px; }
+    .nav-links { display: flex; align-items: center; gap: 32px; }
+    .nav-links a {
+      font-size: 14px; font-weight: 500; color: var(--gray-400);
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--black); }
+    .nav-cta {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 20px; border-radius: 8px;
+      background: var(--black); color: var(--white);
+      font-size: 14px; font-weight: 600;
+      transition: opacity 0.2s;
+    }
+    .nav-cta:hover { opacity: 0.85; }
+    .nav-cta svg { width: 16px; height: 16px; }
+
+    /* ============ Hero ============ */
+    .hero {
+      padding: 160px 0 120px;
+      text-align: center;
+    }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 16px; border-radius: 100px;
+      border: 1px solid var(--gray-200);
+      font-size: 13px; font-weight: 500; color: var(--gray-400);
+      margin-bottom: 32px;
+    }
+    .hero-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--black); }
+    .hero h1 {
+      font-size: 64px; font-weight: 800; line-height: 1.1;
+      letter-spacing: -2px;
+      margin-bottom: 24px;
+    }
+    .hero h1 em {
+      font-style: normal;
+      background: linear-gradient(135deg, var(--black) 0%, var(--gray-400) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero p {
+      font-size: 20px; color: var(--gray-400);
+      max-width: 560px; margin: 0 auto 40px;
+      line-height: 1.7;
+    }
+    .hero-actions { display: flex; justify-content: center; gap: 12px; }
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 14px 28px; border-radius: 10px;
+      background: var(--black); color: var(--white);
+      font-size: 15px; font-weight: 600;
+      transition: opacity 0.2s;
+    }
+    .btn-primary:hover { opacity: 0.85; }
+    .btn-primary svg { width: 18px; height: 18px; }
+    .btn-secondary {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 14px 28px; border-radius: 10px;
+      border: 1px solid var(--gray-200); background: var(--white);
+      font-size: 15px; font-weight: 600; color: var(--black);
+      transition: all 0.2s;
+    }
+    .btn-secondary:hover { border-color: var(--gray-300); background: var(--gray-50); }
+    .btn-secondary svg { width: 18px; height: 18px; }
+
+    /* ============ Screenshot ============ */
+    .screenshot {
+      padding: 0 0 120px;
+    }
+    .screenshot-frame {
+      border-radius: 16px;
+      border: 1px solid var(--gray-200);
+      overflow: hidden;
+      box-shadow: 0 40px 80px -20px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.02);
+    }
+    .screenshot-bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 14px 20px;
+      background: var(--gray-50);
+      border-bottom: 1px solid var(--gray-200);
+    }
+    .screenshot-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--gray-200); }
+    .screenshot-body {
+      aspect-ratio: 16/9;
+      background: linear-gradient(135deg, var(--gray-50) 0%, var(--white) 50%, var(--gray-50) 100%);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .screenshot-mock {
+      display: flex; gap: 1px; height: 80%; width: 85%;
+      border: 1px solid var(--gray-200); border-radius: 8px; overflow: hidden;
+    }
+    .mock-sidebar {
+      width: 200px; background: var(--gray-50);
+      border-right: 1px solid var(--gray-200);
+      padding: 16px;
+    }
+    .mock-sidebar-item {
+      height: 10px; border-radius: 4px; background: var(--gray-200);
+      margin-bottom: 8px;
+    }
+    .mock-sidebar-item:nth-child(1) { width: 60%; }
+    .mock-sidebar-item:nth-child(2) { width: 80%; margin-left: 12px; }
+    .mock-sidebar-item:nth-child(3) { width: 70%; margin-left: 12px; }
+    .mock-sidebar-item:nth-child(4) { width: 50%; margin-left: 12px; }
+    .mock-content {
+      flex: 1; padding: 32px 40px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .mock-line { height: 8px; border-radius: 4px; background: var(--gray-100); }
+    .mock-line:nth-child(1) { width: 40%; height: 14px; background: var(--gray-200); }
+    .mock-line:nth-child(2) { width: 100%; }
+    .mock-line:nth-child(3) { width: 85%; }
+    .mock-line:nth-child(4) { width: 92%; }
+    .mock-line:nth-child(5) { width: 30%; height: 10px; background: var(--gray-200); margin-top: 8px; }
+    .mock-line:nth-child(6) { width: 95%; }
+    .mock-line:nth-child(7) { width: 78%; }
+
+    /* ============ Features ============ */
+    .features { padding: 120px 0; }
+    .section-label {
+      font-size: 13px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 2px; color: var(--gray-400);
+      margin-bottom: 16px;
+    }
+    .section-title {
+      font-size: 40px; font-weight: 800; letter-spacing: -1px;
+      line-height: 1.2; margin-bottom: 64px;
+    }
+    .features-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+    .feature-card {
+      padding: 32px;
+      border: 1px solid var(--gray-200);
+      border-radius: var(--radius);
+      transition: all 0.3s;
+    }
+    .feature-card:hover {
+      border-color: var(--gray-300);
+      box-shadow: 0 8px 24px -8px rgba(0,0,0,0.06);
+    }
+    .feature-icon {
+      width: 48px; height: 48px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 12px; background: var(--gray-50);
+      margin-bottom: 20px;
+    }
+    .feature-icon svg { width: 22px; height: 22px; color: var(--black); }
+    .feature-card h3 { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
+    .feature-card p { font-size: 14px; color: var(--gray-400); line-height: 1.7; }
+
+    /* ============ Plugin Section ============ */
+    .plugin-section { padding: 120px 0; background: var(--gray-50); }
+    .plugin-section .section-title { text-align: center; }
+    .plugin-layout {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 80px; align-items: center;
+      margin-top: 64px;
+    }
+    .plugin-visual {
+      border: 1px solid var(--gray-200); border-radius: var(--radius);
+      background: var(--white); padding: 32px;
+      box-shadow: 0 20px 60px -20px rgba(0,0,0,0.08);
+    }
+    .plugin-code {
+      font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+      font-size: 13px; line-height: 1.8;
+    }
+    .plugin-code .kw { color: var(--gray-400); }
+    .plugin-code .fn { color: var(--black); font-weight: 600; }
+    .plugin-code .str { color: var(--gray-500); }
+    .plugin-code .cmt { color: var(--gray-300); }
+    .plugin-desc h3 { font-size: 32px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 16px; line-height: 1.3; }
+    .plugin-desc p { font-size: 16px; color: var(--gray-400); line-height: 1.8; margin-bottom: 16px; }
+    .plugin-desc ul { list-style: none; margin-top: 24px; }
+    .plugin-desc li {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 8px 0; font-size: 15px;
+    }
+    .plugin-desc li svg { width: 20px; height: 20px; flex-shrink: 0; margin-top: 2px; color: var(--black); }
+
+    /* ============ Pin Section ============ */
+    .pin-section { padding: 120px 0; }
+    .pin-layout {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 80px; align-items: center;
+      margin-top: 64px;
+    }
+    .pin-desc h3 { font-size: 32px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 16px; line-height: 1.3; }
+    .pin-desc p { font-size: 16px; color: var(--gray-400); line-height: 1.8; margin-bottom: 16px; }
+    .pin-visual {
+      border: 1px solid var(--gray-200); border-radius: var(--radius);
+      background: var(--white);
+      padding: 24px;
+      position: relative;
+      box-shadow: 0 20px 60px -20px rgba(0,0,0,0.08);
+    }
+    .pin-demo {
+      border-radius: 8px;
+      border: 1px solid var(--gray-200);
+      background: var(--gray-50);
+      padding: 20px;
+    }
+    .pin-demo-titlebar {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .pin-demo-title { font-size: 12px; color: var(--gray-400); }
+    .pin-demo-badge {
+      font-size: 10px; font-weight: 700;
+      padding: 2px 8px; border-radius: 4px;
+      background: var(--black); color: var(--white);
+      letter-spacing: 0.5px;
+    }
+    .pin-demo-content { font-size: 13px; color: var(--gray-500); line-height: 1.6; }
+    .pin-demo-content .line { height: 6px; background: var(--gray-200); border-radius: 3px; margin-bottom: 6px; }
+    .pin-demo-content .line:nth-child(1) { width: 70%; }
+    .pin-demo-content .line:nth-child(2) { width: 100%; }
+    .pin-demo-content .line:nth-child(3) { width: 85%; }
+    .pin-demo-content .line:nth-child(4) { width: 60%; }
+    .pin-slider { margin-top: 16px; display: flex; align-items: center; gap: 12px; }
+    .pin-slider input[type=range] {
+      flex: 1; -webkit-appearance: none; height: 4px;
+      background: var(--gray-200); border-radius: 2px;
+    }
+    .pin-slider input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 16px; height: 16px;
+      background: var(--black); border-radius: 50%;
+    }
+    .pin-slider span { font-size: 12px; color: var(--gray-400); min-width: 36px; }
+
+    /* ============ AI Section ============ */
+    .ai-section { padding: 120px 0; background: var(--black); color: var(--white); }
+    .ai-section .section-label { color: var(--gray-400); }
+    .ai-section .section-title { color: var(--white); }
+    .ai-layout {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 80px; align-items: center;
+      margin-top: 64px;
+    }
+    .ai-desc p { font-size: 16px; color: var(--gray-400); line-height: 1.8; margin-bottom: 16px; }
+    .ai-desc h3 { font-size: 32px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 16px; line-height: 1.3; color: var(--white); }
+    .ai-visual {
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: var(--radius);
+      background: rgba(255,255,255,0.04);
+      padding: 28px;
+    }
+    .ai-chat-bubble {
+      padding: 14px 18px; border-radius: 12px;
+      font-size: 14px; line-height: 1.6;
+      margin-bottom: 12px;
+    }
+    .ai-chat-user {
+      background: rgba(255,255,255,0.08); color: var(--gray-300);
+      margin-left: 40px;
+    }
+    .ai-chat-ai {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
+      color: var(--gray-400);
+      margin-right: 40px;
+    }
+    .ai-chat-input {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 16px;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      margin-top: 8px;
+    }
+    .ai-chat-input span { flex: 1; font-size: 13px; color: var(--gray-500); }
+
+    /* ============ CTA ============ */
+    .cta { padding: 120px 0; text-align: center; }
+    .cta h2 { font-size: 40px; font-weight: 800; letter-spacing: -1px; margin-bottom: 16px; }
+    .cta p { font-size: 18px; color: var(--gray-400); margin-bottom: 40px; }
+
+    /* ============ Footer ============ */
+    footer {
+      padding: 40px 0;
+      border-top: 1px solid var(--gray-200);
+    }
+    .footer-inner {
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .footer-copy { font-size: 13px; color: var(--gray-400); }
+    .footer-links { display: flex; gap: 24px; }
+    .footer-links a { font-size: 13px; color: var(--gray-400); }
+    .footer-links a:hover { color: var(--black); }
+
+    /* ============ Responsive ============ */
+    @media (max-width: 1024px) {
+      .hero h1 { font-size: 48px; }
+      .features-grid { grid-template-columns: repeat(2, 1fr); }
+      .plugin-layout, .pin-layout, .ai-layout { grid-template-columns: 1fr; gap: 48px; }
+      .plugin-layout .plugin-visual { order: -1; }
+    }
+    @media (max-width: 640px) {
+      .container { padding: 0 20px; }
+      .hero { padding: 120px 0 80px; }
+      .hero h1 { font-size: 36px; letter-spacing: -1px; }
+      .hero p { font-size: 17px; }
+      .hero-actions { flex-direction: column; align-items: center; }
+      .nav-links { display: none; }
+      .features-grid { grid-template-columns: 1fr; }
+      .section-title { font-size: 30px; }
+      .screenshot-mock { flex-direction: column; }
+      .mock-sidebar { width: 100%; height: auto; border-right: none; border-bottom: 1px solid var(--gray-200); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav>
+    <div class="container">
+      <a href="#" class="nav-logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        PaiNote
+      </a>
+      <div class="nav-links">
+        <a href="#features">功能</a>
+        <a href="#plugins">插件</a>
+        <a href="#ai">AI</a>
+      </div>
+      <a href="#" class="nav-cta">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        下载
+      </a>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-badge">
+        <span class="dot"></span>
+        开源 · 跨平台 · 插件化
+      </div>
+      <h1>你的笔记，<br /><em>不被格式定义</em></h1>
+      <p>插件驱动的桌面笔记应用。Markdown、思维导图、Drawio — 任何格式，一个窗口。支持桌面置顶、AI 智能生成。</p>
+      <div class="hero-actions">
+        <a href="#" class="btn-primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          免费下载
+        </a>
+        <a href="#features" class="btn-secondary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+          了解更多
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Screenshot -->
+  <section class="screenshot">
+    <div class="container">
+      <div class="screenshot-frame">
+        <div class="screenshot-bar">
+          <div class="screenshot-dot"></div>
+          <div class="screenshot-dot"></div>
+          <div class="screenshot-dot"></div>
+        </div>
+        <div class="screenshot-body">
+          <div class="screenshot-mock">
+            <div class="mock-sidebar">
+              <div class="mock-sidebar-item"></div>
+              <div class="mock-sidebar-item"></div>
+              <div class="mock-sidebar-item"></div>
+              <div class="mock-sidebar-item"></div>
+            </div>
+            <div class="mock-content">
+              <div class="mock-line"></div>
+              <div class="mock-line"></div>
+              <div class="mock-line"></div>
+              <div class="mock-line"></div>
+              <div class="mock-line"></div>
+              <div class="mock-line"></div>
+              <div class="mock-line"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="features" id="features">
+    <div class="container">
+      <div class="section-label">核心功能</div>
+      <h2 class="section-title">为高效笔记而生</h2>
+      <div class="features-grid">
+
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+          </div>
+          <h3>插件化格式系统</h3>
+          <p>引擎与格式完全解耦。Markdown、思维导图、Drawio、任意格式 — 通过安装插件扩展，无需修改核心代码。</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          </div>
+          <h3>桌面置顶</h3>
+          <p>任何笔记窗口一键 Pin 到桌面最顶层。自定义透明度、贴边自动收起、多窗口同时置顶。</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 2 13 2"/><line x1="12" y1="14" x2="12" y2="14"/></svg>
+          </div>
+          <h3>AI 智能生成</h3>
+          <p>自然语言生成笔记内容，自动匹配当前格式。上传文件、图片、语音自动转为结构化笔记。</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+          </div>
+          <h3>文件管理</h3>
+          <p>VSCode 风格文件树。新建文档与目录、拖拽排序、右键菜单。拖拽外部文件自动在新窗口打开。</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </div>
+          <h3>多窗口独立</h3>
+          <p>每个笔记可独立打开为新窗口，自由拖拽到任意显示器。窗口间完全独立，互不干扰。</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          </div>
+          <h3>所见即所得</h3>
+          <p>内置 Milkdown WYSIWYG 编辑器。实时渲染 Markdown，编辑即预览，支持 GFM 语法。</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Plugin System -->
+  <section class="plugin-section" id="plugins">
+    <div class="container">
+      <div class="section-label" style="text-align:center">插件系统</div>
+      <h2 class="section-title">你的格式，你来定义</h2>
+      <div class="plugin-layout">
+        <div class="plugin-visual">
+          <div class="plugin-code">
+            <span class="cmt">// 定义插件</span><br/>
+            <span class="kw">import</span> { definePlugin } <span class="kw">from</span> <span class="str">'painote-plugin-sdk'</span><br/><br/>
+            <span class="kw">export default</span> <span class="fn">definePlugin</span>({<br/>
+            &nbsp;&nbsp;<span class="fn">manifest</span>: {<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;id: <span class="str">'mindmap'</span>,<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;name: <span class="str">'Mind Map'</span>,<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;type: <span class="str">'format'</span>,<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;extensions: [<span class="str">'.mm'</span>]<br/>
+            &nbsp;&nbsp;},<br/><br/>
+            &nbsp;&nbsp;<span class="fn">onActivate</span>(ctx) {<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;ctx.logger.<span class="fn">info</span>(<span class="str">'Ready!'</span>)<br/>
+            &nbsp;&nbsp;},<br/><br/>
+            &nbsp;&nbsp;format: {<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;<span class="fn">render</span>(content) { <span class="cmt">/* ... */</span> },<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;<span class="fn">getDefaultContent</span>() {<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="kw">return</span> <span class="str">'# Central Topic\n'</span><br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+            &nbsp;&nbsp;}<br/>
+            })
+          </div>
+        </div>
+        <div class="plugin-desc">
+          <h3>标准 SDK，无限扩展</h3>
+          <p>PaiNote 提供完整的插件 SDK，定义了清晰的生命周期、格式接口和 AI 适配器。第三方开发者可以在几分钟内创建自己的笔记格式插件。</p>
+          <ul>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              <span>完整的生命周期管理：安装、激活、停用、卸载</span>
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              <span>格式适配器：每种格式定义自己的渲染和编辑逻辑</span>
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              <span>AI 集成：插件可定义专属 AI prompt 模板</span>
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              <span>插件商城：可视化安装、启用、卸载插件</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pin to Top -->
+  <section class="pin-section" id="pin">
+    <div class="container">
+      <div class="section-label">桌面置顶</div>
+      <h2 class="section-title">笔记浮在桌面之上</h2>
+      <div class="pin-layout">
+        <div class="pin-desc">
+          <h3>工作时的最佳伴侣</h3>
+          <p>将笔记窗口置顶到所有应用窗口之上。无论你切换到任何程序，笔记内容始终可见。适合做会议笔记、API 文档、待办清单等场景。</p>
+          <p>支持自定义透明度，让笔记半透明浮在其他应用之上，不会遮挡全部视线。还支持贴边自动收起——窗口拖到屏幕边缘自动折叠为细条，鼠标移入立即展开。</p>
+        </div>
+        <div class="pin-visual">
+          <div class="pin-demo">
+            <div class="pin-demo-titlebar">
+              <span class="pin-demo-title">Meeting Notes.md</span>
+              <span class="pin-demo-badge">PINNED</span>
+            </div>
+            <div class="pin-demo-content">
+              <div class="line"></div>
+              <div class="line"></div>
+              <div class="line"></div>
+              <div class="line"></div>
+            </div>
+            <div class="pin-slider">
+              <span>透明度</span>
+              <input type="range" min="30" max="100" value="85" />
+              <span>85%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- AI Section -->
+  <section class="ai-section" id="ai">
+    <div class="container">
+      <div class="section-label">AI 集成</div>
+      <h2 class="section-title">用自然语言，创建笔记</h2>
+      <div class="ai-layout">
+        <div class="ai-desc">
+          <h3>描述想法，AI 负责实现</h3>
+          <p>输入"创建一份项目周报模板"，AI 自动生成结构化的 Markdown 内容。如果你正在使用思维导图格式，AI 会自动输出层级结构。</p>
+          <p>支持多轮对话修改——"把第三部分拆分成三个子条目"，"添加一个负责人列"——AI 基于上下文持续优化笔记内容。</p>
+        </div>
+        <div class="ai-visual">
+          <div class="ai-chat-bubble ai-chat-user">帮我创建一份项目架构文档，包含技术栈选型和模块划分</div>
+          <div class="ai-chat-bubble ai-chat-ai"># 项目架构文档
+
+## 技术栈选型
+
+| 层级 | 技术方案 | 说明 |
+|------|---------|------|
+| 前端 | React + TypeScript | 组件化开发 |
+| 状态管理 | Zustand | 轻量高效 |
+| 后端 | Node.js + Express | 快速迭代 |
+
+## 模块划分
+
+### 1. 用户模块
+- 注册 / 登录 / 权限管理
+
+### 2. 数据模块
+- 数据模型定义
+- API 接口设计</div>
+          <div class="ai-chat-input">
+            <svg style="width:16px;height:16px;color:rgba(255,255,255,0.3)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            <span>继续优化，添加部署方案...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta">
+    <div class="container">
+      <h2>开始使用 PaiNote</h2>
+      <p>免费、开源、跨平台。让你的笔记工具，跟上你的思维。</p>
+      <div class="hero-actions">
+        <a href="#" class="btn-primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          下载 v1.0.0
+        </a>
+        <a href="#" class="btn-secondary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6c-1-3.5-4-5-7-5s-6 1.5-7 5m14-4c0 1-1 1-1 1H5c0 0-1 0-1-1m14-4c0-1-1-1-1-1H5c0 0-1 0-1 1"/><path d="M12 2v20"/></svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <div class="footer-inner">
+        <div class="footer-copy">© 2024 PaiNote. Open Source.</div>
+        <div class="footer-links">
+          <a href="#">文档</a>
+          <a href="#">插件市场</a>
+          <a href="#">GitHub</a>
+          <a href="#">反馈</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>

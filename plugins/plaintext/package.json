@@ -1,0 +1,16 @@
+{
+  "name": "@painote/builtin-plaintext",
+  "version": "1.0.0",
+  "description": "PaiNote 内置纯文本格式插件",
+  "main": "dist/index.js",
+  "painote": {
+    "id": "plaintext",
+    "format": "plaintext",
+    "displayName": "纯文本",
+    "description": "最朴素的文本笔记格式，作为插件系统的最小验证示例",
+    "icon": "icon.png",
+    "permissions": ["fs:notes", "ai:generate", "storage"],
+    "minAppVersion": "1.0.0",
+    "builtin": true
+  }
+}

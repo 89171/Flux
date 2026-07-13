@@ -1,0 +1,16 @@
+{
+  "name": "@painote/builtin-markdown",
+  "version": "1.0.0",
+  "description": "PaiNote 内置 Markdown 格式插件：CodeMirror 6 编辑 + react-markdown 实时预览",
+  "main": "dist/index.js",
+  "painote": {
+    "id": "markdown",
+    "format": "markdown",
+    "displayName": "Markdown",
+    "description": "CodeMirror 6 编辑 + react-markdown 实时预览，支持 GFM",
+    "icon": "icon.png",
+    "permissions": ["fs:notes", "ai:generate", "storage"],
+    "minAppVersion": "1.0.0",
+    "builtin": true
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "plaintext",
+  "name": "Plain Text",
+  "version": "1.0.0",
+  "author": "PaiNote",
+  "description": "Built-in plain text editor for .txt files.",
+  "type": "format",
+  "extensions": ["txt"],
+  "main": "main.js",
+  "icon": "FileText",
+  "builtin": true,
+  "minAppVersion": "1.0.0"
+}

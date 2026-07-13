@@ -1,0 +1,13 @@
+{
+  "id": "markdown",
+  "name": "Markdown",
+  "version": "1.0.0",
+  "author": "PaiNote",
+  "description": "Built-in Markdown editor with WYSIWYG support via Milkdown.",
+  "type": "format",
+  "extensions": ["md", "markdown"],
+  "main": "main.js",
+  "icon": "FileText",
+  "builtin": true,
+  "minAppVersion": "1.0.0"
+}

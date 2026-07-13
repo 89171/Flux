@@ -1,0 +1,13 @@
+{
+  "id": "mindmap",
+  "name": "Mindmap",
+  "version": "1.0.0",
+  "author": "PaiNote",
+  "description": "Built-in mindmap editor for visual thinking and brainstorming.",
+  "type": "format",
+  "extensions": ["mm"],
+  "main": "main.js",
+  "icon": "Network",
+  "builtin": true,
+  "minAppVersion": "1.0.0"
+}
