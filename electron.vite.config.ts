@@ -30,11 +30,21 @@ export default defineConfig({
     // undefined. Replace both refs at bundle time (dev + prod, incl.
     // esbuild's dep-optimize pass) so the code collapses to a plain
     // require of the shipped bundle before it ever hits the browser.
+    //
+    // EXCALIDRAW_ASSET_PATH: Excalidraw reads this at module init time to
+    // decide where to fetch lazy chunks (fonts, vendor JS). Default is
+    // unpkg.com CDN, which our CSP blocks. Setting '/' here (replaced at
+    // bundle time so it wins the || check) makes Excalidraw load from
+    // /excalidraw-assets/ (prod) or /excalidraw-assets-dev/ (dev), which
+    // are copied from node_modules to src/renderer/public/ by the
+    // predev/prebuild hook and served by Vite / Electron at the same
+    // origin — allowed by script-src 'self'.
     define: {
       'process.env.IS_PREACT': JSON.stringify('false'),
       'process.env.NODE_ENV': JSON.stringify(
         process.env.NODE_ENV === 'production' ? 'production' : 'development'
-      )
+      ),
+      'window.EXCALIDRAW_ASSET_PATH': JSON.stringify('/')
     },
     optimizeDeps: {
       // Force pre-bundling for these — they're CJS-only and need

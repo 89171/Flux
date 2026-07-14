@@ -6,3 +6,5 @@ release
 *.log
 dev-plugins/*
 !dev-plugins/.gitkeep
+# Excalidraw assets copied from node_modules by predev/prebuild hook
+src/renderer/public/

@@ -56,7 +56,8 @@ import {
   GitBranch,
   GitMerge,
   LayoutGrid,
-  Waypoints
+  Waypoints,
+  PanelLeftClose
 } from 'lucide-react'
 import type { NoteFile, NoteFormat } from '@shared/types'
 import { useFileStore } from '../stores/fileStore'
@@ -419,7 +420,7 @@ function TreeNode({
   )
 }
 
-export function Sidebar() {
+export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const tree = useFileStore((s) => s.tree)
   const currentFile = useFileStore((s) => s.currentFile)
   const openFile = useFileStore((s) => s.openFile)
@@ -880,6 +881,14 @@ export function Sidebar() {
             type="button"
           >
             <RefreshCw size={15} strokeWidth={1.8} />
+          </button>
+          <button
+            className="sidebar-action-btn tooltip"
+            data-tooltip="Collapse Explorer"
+            onClick={onCollapse}
+            type="button"
+          >
+            <PanelLeftClose size={16} strokeWidth={1.8} />
           </button>
         </div>
       </div>

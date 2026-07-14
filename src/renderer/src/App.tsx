@@ -23,6 +23,7 @@ type AppView = 'editor' | 'plugins'
 export default function App() {
   const [view, setView] = useState<AppView>('editor')
   const [aiPanelOpen, setAiPanelOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   const loadTree = useFileStore((s) => s.loadTree)
   const loadPlugins = usePluginStore((s) => s.loadPlugins)
@@ -105,9 +106,17 @@ export default function App() {
           {/* Activity Bar - Icon-only vertical bar (VSCode style) */}
           <div className="activity-bar">
             <button
-              className={`activity-bar-btn ${!aiPanelOpen ? 'active' : ''}`}
-              onClick={() => { setView('editor'); setAiPanelOpen(false) }}
-              data-tooltip="Editor"
+              className={`activity-bar-btn ${view === 'editor' && !aiPanelOpen && !sidebarCollapsed ? 'active' : ''}`}
+              onClick={() => {
+                if (view !== 'editor') {
+                  setView('editor')
+                  setAiPanelOpen(false)
+                  setSidebarCollapsed(false)
+                } else {
+                  setSidebarCollapsed((v) => !v)
+                }
+              }}
+              data-tooltip={sidebarCollapsed ? 'Show Explorer' : 'Hide Explorer'}
             >
               <FileText size={20} />
             </button>
@@ -128,7 +137,7 @@ export default function App() {
           </div>
 
           {/* Main Content Area */}
-          <Sidebar />
+          {!sidebarCollapsed && <Sidebar onCollapse={() => setSidebarCollapsed(true)} />}
           <Editor />
           {aiPanelOpen && (
             <div className="right-panel">

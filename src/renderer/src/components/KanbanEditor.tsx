@@ -9,19 +9,24 @@
  *                   "title": "...", "description": "?", "createdAt": ts }]
  *   }
  *
- * Empty / malformed input seeds the three canonical Chinese buckets
- * ("规划中" / "进行中" / "已完成") so a fresh .todo file is immediately
- * usable. Users can rename or reorder columns; the ids stay stable so
- * card references survive renames.
- *
- * Drag-and-drop uses the platform-native HTML5 DnD — no library, no
- * bundle overhead. Both cards (across columns) and columns (across
- * board) are draggable via the same mechanism, disambiguated by the
- * `text/x-painote-kanban` dataTransfer type.
+ * Interactions:
+ *   - Click "添加任务" → modal with title + markdown description
+ *   - Task cards show only the title; click to open edit/delete modal
+ *   - Drag cards between columns (HTML5 DnD — no library)
+ *   - Double-click column name to rename
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type DragEvent
+} from 'react'
 import { Plus, X, Pencil, Trash2, GripVertical } from 'lucide-react'
+import { marked } from 'marked'
 
 export interface KanbanEditorProps {
   value: string
@@ -48,6 +53,15 @@ interface KanbanDoc {
   cards: KanbanCard[]
 }
 
+interface ModalState {
+  mode: 'add' | 'edit'
+  columnId: string
+  cardId: string | null
+  title: string
+  description: string
+  tab: 'write' | 'preview'
+}
+
 const DEFAULT_COLUMNS: KanbanColumn[] = [
   { id: 'col-planning', name: '规划中' },
   { id: 'col-in-progress', name: '进行中' },
@@ -68,15 +82,24 @@ function parseDoc(raw: string): KanbanDoc {
     if (!parsed || typeof parsed !== 'object') throw new Error('not an object')
     const cols = Array.isArray(parsed.columns) ? parsed.columns : []
     const cards = Array.isArray(parsed.cards) ? parsed.cards : []
-    // Coerce back into typed shape; drop entries that don't validate so
-    // one bad row doesn't wreck the whole board.
     const columns: KanbanColumn[] = cols
-      .filter((c: unknown): c is KanbanColumn =>
-        !!c && typeof c === 'object' && typeof (c as KanbanColumn).id === 'string' && typeof (c as KanbanColumn).name === 'string')
+      .filter(
+        (c: unknown): c is KanbanColumn =>
+          !!c &&
+          typeof c === 'object' &&
+          typeof (c as KanbanColumn).id === 'string' &&
+          typeof (c as KanbanColumn).name === 'string'
+      )
       .map((c: KanbanColumn) => ({ id: c.id, name: c.name }))
     const cleanCards: KanbanCard[] = cards
-      .filter((k: unknown): k is KanbanCard =>
-        !!k && typeof k === 'object' && typeof (k as KanbanCard).id === 'string' && typeof (k as KanbanCard).columnId === 'string' && typeof (k as KanbanCard).title === 'string')
+      .filter(
+        (k: unknown): k is KanbanCard =>
+          !!k &&
+          typeof k === 'object' &&
+          typeof (k as KanbanCard).id === 'string' &&
+          typeof (k as KanbanCard).columnId === 'string' &&
+          typeof (k as KanbanCard).title === 'string'
+      )
       .map((k: KanbanCard) => ({
         id: k.id,
         columnId: k.columnId,
@@ -94,8 +117,6 @@ function parseDoc(raw: string): KanbanDoc {
   }
 }
 
-// Shared drag-payload MIME type. Using a custom type stops the drag from
-// interfering with (or being interfered by) plain text drops.
 const DRAG_MIME = 'application/x-painote-kanban'
 
 const columnStyle: CSSProperties = {
@@ -114,8 +135,9 @@ const cardStyle: CSSProperties = {
   border: '1px solid var(--border-light)',
   borderRadius: 6,
   padding: '8px 10px',
-  cursor: 'grab',
-  fontSize: 13
+  cursor: 'pointer',
+  fontSize: 13,
+  userSelect: 'none'
 }
 
 const iconBtnStyle: CSSProperties = {
@@ -129,6 +151,18 @@ const iconBtnStyle: CSSProperties = {
   alignItems: 'center'
 }
 
+const inputStyle: CSSProperties = {
+  width: '100%',
+  padding: '7px 10px',
+  border: '1px solid var(--border-color)',
+  borderRadius: 6,
+  fontSize: 13,
+  background: 'var(--bg-primary)',
+  color: 'var(--text-primary)',
+  outline: 'none',
+  boxSizing: 'border-box'
+}
+
 export function KanbanEditor({
   value,
   onChange,
@@ -137,16 +171,12 @@ export function KanbanEditor({
   const [doc, setDoc] = useState<KanbanDoc>(() => parseDoc(value))
   const [editingColumn, setEditingColumn] = useState<string | null>(null)
   const [columnNameDraft, setColumnNameDraft] = useState('')
-  const [composingIn, setComposingIn] = useState<string | null>(null)
-  const [newCardTitle, setNewCardTitle] = useState('')
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null)
+  const [modal, setModal] = useState<ModalState | null>(null)
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
   const lastSerialisedRef = useRef<string>('')
 
-  // Sync any change back to disk (via parent). Serialise once here so
-  // the same object never gets stringified twice, and skip echoes so
-  // an external broadcast update doesn't flag the file dirty.
   const commit = useCallback((next: KanbanDoc) => {
     setDoc(next)
     const serialised = JSON.stringify(next, null, 2)
@@ -155,7 +185,6 @@ export function KanbanEditor({
     onChangeRef.current(serialised)
   }, [])
 
-  // If the parent hands us a new `value` (external write), fold it in.
   useEffect(() => {
     if (value === lastSerialisedRef.current) return
     const next = parseDoc(value)
@@ -199,29 +228,35 @@ export function KanbanEditor({
   // ---------- Card ops ----------
 
   const addCard = useCallback(
-    (columnId: string, title: string) => {
+    (columnId: string, title: string, description?: string) => {
       const trimmed = title.trim()
       if (!trimmed) return
-      const card: KanbanCard = {
-        id: uid('card'),
-        columnId,
-        title: trimmed,
-        createdAt: Date.now()
-      }
-      commit({ ...doc, cards: [...doc.cards, card] })
+      commit({
+        ...doc,
+        cards: [
+          ...doc.cards,
+          {
+            id: uid('card'),
+            columnId,
+            title: trimmed,
+            description: description?.trim() || undefined,
+            createdAt: Date.now()
+          }
+        ]
+      })
     },
     [doc, commit]
   )
 
-  const editCard = useCallback(
-    (id: string) => {
-      const card = doc.cards.find((c) => c.id === id)
-      if (!card) return
-      const next = prompt('编辑标题', card.title)?.trim()
-      if (!next || next === card.title) return
+  const updateCard = useCallback(
+    (id: string, title: string, description: string) => {
       commit({
         ...doc,
-        cards: doc.cards.map((c) => (c.id === id ? { ...c, title: next } : c))
+        cards: doc.cards.map((c) =>
+          c.id === id
+            ? { ...c, title: title.trim(), description: description.trim() || undefined }
+            : c
+        )
       })
     },
     [doc, commit]
@@ -246,6 +281,41 @@ export function KanbanEditor({
     [doc, commit]
   )
 
+  // ---------- Modal ----------
+
+  const openAddModal = useCallback((columnId: string) => {
+    setModal({ mode: 'add', columnId, cardId: null, title: '', description: '', tab: 'write' })
+  }, [])
+
+  const openEditModal = useCallback((card: KanbanCard) => {
+    setModal({
+      mode: 'edit',
+      columnId: card.columnId,
+      cardId: card.id,
+      title: card.title,
+      description: card.description ?? '',
+      tab: 'write'
+    })
+  }, [])
+
+  const closeModal = useCallback(() => setModal(null), [])
+
+  const saveModal = useCallback(() => {
+    if (!modal || !modal.title.trim()) return
+    if (modal.mode === 'add') {
+      addCard(modal.columnId, modal.title, modal.description)
+    } else {
+      updateCard(modal.cardId!, modal.title, modal.description)
+    }
+    setModal(null)
+  }, [modal, addCard, updateCard])
+
+  const deleteFromModal = useCallback(() => {
+    if (!modal?.cardId) return
+    deleteCard(modal.cardId)
+    setModal(null)
+  }, [modal, deleteCard])
+
   // ---------- Drag & drop ----------
 
   const handleDragStart = useCallback((e: DragEvent<HTMLDivElement>, cardId: string) => {
@@ -255,9 +325,6 @@ export function KanbanEditor({
 
   const handleColumnDragOver = useCallback(
     (e: DragEvent<HTMLDivElement>, columnId: string) => {
-      // Only intercept drops that carry our own payload — otherwise the
-      // OS-level drop (e.g. external file drop) should propagate to the
-      // Editor's file-open handler.
       if (!e.dataTransfer.types.includes(DRAG_MIME)) return
       e.preventDefault()
       e.dataTransfer.dropEffect = 'move'
@@ -279,8 +346,6 @@ export function KanbanEditor({
 
   const handleColumnDragLeave = useCallback(
     (e: DragEvent<HTMLDivElement>, columnId: string) => {
-      // Only clear when leaving the column entirely — dragenter on
-      // nested children fires dragleave on the parent otherwise.
       if (e.currentTarget.contains(e.relatedTarget as Node)) return
       if (dragOverColumn === columnId) setDragOverColumn(null)
     },
@@ -295,12 +360,19 @@ export function KanbanEditor({
     for (const card of doc.cards) {
       const bucket = map.get(card.columnId)
       if (bucket) bucket.push(card)
-      // Cards whose column was deleted end up in the first column so
-      // they don't vanish into an inconsistent state.
       else map.get(doc.columns[0]?.id)?.push({ ...card, columnId: doc.columns[0].id })
     }
     return map
   }, [doc])
+
+  const renderedMarkdown = useMemo(() => {
+    if (!modal?.description) return ''
+    try {
+      return marked.parse(modal.description) as string
+    } catch {
+      return ''
+    }
+  }, [modal?.description, modal?.tab])
 
   return (
     <div
@@ -323,7 +395,7 @@ export function KanbanEditor({
               key={column.id}
               style={{
                 ...columnStyle,
-                outline: isDragTarget ? '2px dashed var(--accent-primary)' : 'none'
+                outline: isDragTarget ? '2px dashed var(--accent)' : 'none'
               }}
               onDragOver={(e) => handleColumnDragOver(e, column.id)}
               onDrop={(e) => handleColumnDrop(e, column.id)}
@@ -352,7 +424,7 @@ export function KanbanEditor({
                     style={{
                       flex: 1,
                       background: 'var(--bg-primary)',
-                      border: '1px solid var(--accent-primary)',
+                      border: '1px solid var(--accent)',
                       borderRadius: 4,
                       padding: '2px 6px',
                       fontSize: 13,
@@ -409,104 +481,59 @@ export function KanbanEditor({
                 )}
               </div>
 
-              {/* Cards */}
+              {/* Cards — title only, click to open modal */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minHeight: 40 }}>
                 {cards.map((card) => (
                   <div
                     key={card.id}
                     draggable
                     onDragStart={(e) => handleDragStart(e, card.id)}
+                    onClick={() => openEditModal(card)}
                     style={cardStyle}
                   >
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-                      <div style={{ flex: 1, color: 'var(--text-primary)' }}>{card.title}</div>
-                      <button
-                        onClick={() => editCard(card.id)}
-                        style={iconBtnStyle}
-                        title="编辑"
-                      >
-                        <Pencil size={12} />
-                      </button>
-                      <button
-                        onClick={() => deleteCard(card.id)}
-                        style={iconBtnStyle}
-                        title="删除"
-                      >
-                        <X size={13} />
-                      </button>
+                    <div
+                      style={{
+                        color: 'var(--text-primary)',
+                        lineHeight: 1.4,
+                        wordBreak: 'break-word'
+                      }}
+                    >
+                      {card.title}
                     </div>
                   </div>
                 ))}
               </div>
 
               {/* Add card */}
-              {composingIn === column.id ? (
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <input
-                    autoFocus
-                    value={newCardTitle}
-                    onChange={(e) => setNewCardTitle(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        addCard(column.id, newCardTitle)
-                        setNewCardTitle('')
-                        setComposingIn(null)
-                      } else if (e.key === 'Escape') {
-                        setComposingIn(null)
-                        setNewCardTitle('')
-                      }
-                    }}
-                    onBlur={() => {
-                      if (newCardTitle.trim()) {
-                        addCard(column.id, newCardTitle)
-                      }
-                      setNewCardTitle('')
-                      setComposingIn(null)
-                    }}
-                    placeholder="任务标题"
-                    style={{
-                      flex: 1,
-                      background: 'var(--bg-primary)',
-                      border: '1px solid var(--accent-primary)',
-                      borderRadius: 4,
-                      padding: '4px 6px',
-                      fontSize: 13,
-                      color: 'var(--text-primary)',
-                      outline: 'none'
-                    }}
-                  />
-                </div>
-              ) : (
-                <button
-                  onClick={() => setComposingIn(column.id)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    padding: '6px 8px',
-                    background: 'transparent',
-                    border: '1px dashed var(--border-secondary)',
-                    borderRadius: 4,
-                    color: 'var(--text-tertiary)',
-                    cursor: 'pointer',
-                    fontSize: 12
-                  }}
-                >
-                  <Plus size={13} /> 添加任务
-                </button>
-              )}
+              <button
+                onClick={() => openAddModal(column.id)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '6px 8px',
+                  background: 'transparent',
+                  border: '1px dashed var(--border-color)',
+                  borderRadius: 4,
+                  color: 'var(--text-tertiary)',
+                  cursor: 'pointer',
+                  fontSize: 12
+                }}
+              >
+                <Plus size={13} /> 添加任务
+              </button>
             </div>
           )
         })}
 
-        {/* Add column button */}
+        {/* Add column */}
         <button
           onClick={addColumn}
           title="添加列"
           style={{
             flex: '0 0 44px',
             height: 44,
-            border: '1px dashed var(--border-secondary)',
+            border: '1px dashed var(--border-color)',
             borderRadius: 8,
             background: 'transparent',
             color: 'var(--text-tertiary)',
@@ -519,6 +546,252 @@ export function KanbanEditor({
           <Plus size={16} />
         </button>
       </div>
+
+      {/* Card modal */}
+      {modal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.45)',
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+          onClick={closeModal}
+          onKeyDown={(e) => e.key === 'Escape' && closeModal()}
+        >
+          <div
+            style={{
+              background: 'var(--bg-primary)',
+              borderRadius: 10,
+              width: 'min(560px, 92vw)',
+              maxHeight: '82vh',
+              overflow: 'auto',
+              padding: '20px 24px',
+              boxShadow: '0 12px 40px rgba(0,0,0,0.22)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 16
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}
+            >
+              <span
+                style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}
+              >
+                {modal.mode === 'add' ? '添加任务' : '编辑任务'}
+              </span>
+              <button onClick={closeModal} style={iconBtnStyle}>
+                <X size={17} />
+              </button>
+            </div>
+
+            {/* Title */}
+            <div>
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: 'var(--text-tertiary)',
+                  marginBottom: 6,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em'
+                }}
+              >
+                标题
+              </div>
+              <input
+                autoFocus
+                value={modal.title}
+                onChange={(e) =>
+                  setModal((prev) => (prev ? { ...prev, title: e.target.value } : null))
+                }
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveModal()
+                  if (e.key === 'Escape') closeModal()
+                }}
+                placeholder="任务标题"
+                style={inputStyle}
+              />
+            </div>
+
+            {/* Description */}
+            <div style={{ flex: 1 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: 6
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: 'var(--text-tertiary)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em'
+                  }}
+                >
+                  内容
+                </div>
+                <div style={{ display: 'flex', border: '1px solid var(--border-color)', borderRadius: 5, overflow: 'hidden' }}>
+                  {(['write', 'preview'] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() =>
+                        setModal((prev) => (prev ? { ...prev, tab } : null))
+                      }
+                      style={{
+                        padding: '3px 10px',
+                        fontSize: 12,
+                        background: modal.tab === tab ? 'var(--bg-active)' : 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: modal.tab === tab ? 'var(--text-primary)' : 'var(--text-tertiary)',
+                        fontWeight: modal.tab === tab ? 600 : 400,
+                        transition: 'background 0.1s'
+                      }}
+                    >
+                      {tab === 'write' ? '编辑' : '预览'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {modal.tab === 'write' ? (
+                <textarea
+                  value={modal.description}
+                  onChange={(e) =>
+                    setModal((prev) => (prev ? { ...prev, description: e.target.value } : null))
+                  }
+                  onKeyDown={(e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') saveModal()
+                    if (e.key === 'Escape') closeModal()
+                  }}
+                  placeholder="支持 Markdown 格式…"
+                  rows={8}
+                  style={{
+                    ...inputStyle,
+                    resize: 'vertical',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 13,
+                    lineHeight: 1.6
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    minHeight: 120,
+                    padding: '8px 10px',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 6,
+                    background: 'var(--bg-secondary)',
+                    fontSize: 13,
+                    color: 'var(--text-primary)',
+                    lineHeight: 1.7,
+                    overflowY: 'auto'
+                  }}
+                  className="kanban-md-preview"
+                  dangerouslySetInnerHTML={{
+                    __html: renderedMarkdown ||
+                      '<span style="color:var(--text-tertiary);font-style:italic">无内容</span>'
+                  }}
+                />
+              )}
+              {modal.tab === 'write' && (
+                <div
+                  style={{
+                    marginTop: 4,
+                    fontSize: 11,
+                    color: 'var(--text-tertiary)'
+                  }}
+                >
+                  支持 Markdown · Ctrl+Enter 保存
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                paddingTop: 4,
+                borderTop: '1px solid var(--border-light)'
+              }}
+            >
+              {modal.mode === 'edit' ? (
+                <button
+                  onClick={deleteFromModal}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: '6px 14px',
+                    background: 'transparent',
+                    border: '1px solid #ef4444',
+                    borderRadius: 6,
+                    color: '#ef4444',
+                    fontSize: 13,
+                    cursor: 'pointer',
+                    fontWeight: 500
+                  }}
+                >
+                  <Trash2 size={13} />
+                  删除
+                </button>
+              ) : (
+                <div />
+              )}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={closeModal}
+                  style={{
+                    padding: '6px 16px',
+                    background: 'transparent',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 6,
+                    color: 'var(--text-secondary)',
+                    fontSize: 13,
+                    cursor: 'pointer'
+                  }}
+                >
+                  取消
+                </button>
+                <button
+                  onClick={saveModal}
+                  disabled={!modal.title.trim()}
+                  style={{
+                    padding: '6px 16px',
+                    background: 'var(--accent)',
+                    border: 'none',
+                    borderRadius: 6,
+                    color: '#fff',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: modal.title.trim() ? 'pointer' : 'not-allowed',
+                    opacity: modal.title.trim() ? 1 : 0.45
+                  }}
+                >
+                  保存
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

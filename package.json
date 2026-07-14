@@ -6,7 +6,9 @@
   "author": "PaiNote",
   "license": "MIT",
   "scripts": {
+    "predev": "node scripts/copy-excalidraw-assets.js",
     "dev": "electron-vite dev",
+    "prebuild": "node scripts/copy-excalidraw-assets.js",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",

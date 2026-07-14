@@ -190,7 +190,7 @@ function PluginCard({
             justifyContent: 'center',
             fontSize: '18px',
             fontWeight: 700,
-            color: 'var(--accent-primary)',
+            color: 'var(--accent)',
             flexShrink: 0
           }}
         >
@@ -230,8 +230,8 @@ function PluginCard({
                   fontWeight: 600,
                   padding: '1px 6px',
                   borderRadius: '3px',
-                  background: 'var(--accent-primary-dim, rgba(37, 99, 235, 0.12))',
-                  color: 'var(--accent-primary)',
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--accent)',
                   lineHeight: 1.4
                 }}
               >
@@ -301,8 +301,8 @@ function PluginCard({
                 fontSize: '11px',
                 padding: '2px 6px',
                 borderRadius: '4px',
-                background: 'var(--accent-primary-dim)',
-                color: 'var(--accent-primary)',
+                background: 'var(--bg-tertiary)',
+                color: 'var(--text-secondary)',
                 fontWeight: 500
               }}
             >
@@ -322,8 +322,8 @@ function PluginCard({
             padding: '6px 8px',
             marginBottom: '10px',
             borderRadius: '6px',
-            background: 'var(--color-error-bg, rgba(239, 68, 68, 0.1))',
-            color: 'var(--color-error, #ef4444)',
+            background: 'rgba(239, 68, 68, 0.1)',
+            color: '#ef4444',
             fontSize: '12px'
           }}
         >
@@ -332,62 +332,76 @@ function PluginCard({
         </div>
       )}
 
-      {/* Action button — single Install/Remove switch. Third-party
-          removals ask for a second click to confirm because they delete
-          the plugin dir off disk. Built-in removals are one-click since
-          they're reversible via Install. */}
-      <div style={{ display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '10px', borderTop: '1px solid var(--border-secondary)' }}>
-        <button
-          onClick={handlePrimaryAction}
-          disabled={isInstalling}
-          title={
-            isPresent
-              ? plugin.isBuiltin
-                ? 'Remove from app (files stay bundled, re-installable)'
+      {/* Action buttons */}
+      <div style={{ display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '10px', borderTop: '1px solid var(--border-light)' }}>
+
+        {/* Install — visible only when plugin is not active */}
+        {!isPresent && (
+          <button
+            onClick={handlePrimaryAction}
+            disabled={isInstalling}
+            title="Install plugin"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '5px 14px',
+              borderRadius: '6px',
+              border: '1px solid var(--accent)',
+              background: 'var(--accent)',
+              color: '#fff',
+              cursor: isInstalling ? 'not-allowed' : 'pointer',
+              fontSize: '12px',
+              fontWeight: 600,
+              opacity: isInstalling ? 0.5 : 1,
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <Download size={13} />
+            Install
+          </button>
+        )}
+
+        {/* Remove / Disable — visible only when plugin is active */}
+        {isPresent && (
+          <button
+            onClick={handlePrimaryAction}
+            disabled={isInstalling}
+            title={
+              plugin.isBuiltin
+                ? 'Disable plugin (files stay bundled, re-installable)'
                 : confirmRemove
                   ? 'Click again to confirm — this deletes the plugin dir'
                   : 'Remove plugin'
-              : 'Install plugin'
-          }
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '5px',
-            padding: '5px 12px',
-            borderRadius: '6px',
-            border: '1px solid',
-            borderColor:
-              isPresent && !plugin.isBuiltin && confirmRemove
-                ? 'var(--color-error, #ef4444)'
-                : isPresent
-                  ? 'var(--border-secondary)'
-                  : 'var(--accent-primary)',
-            background:
-              isPresent && !plugin.isBuiltin && confirmRemove
-                ? 'var(--color-error, #ef4444)'
-                : isPresent
-                  ? 'transparent'
-                  : 'var(--accent-primary)',
-            color:
-              isPresent && !plugin.isBuiltin && confirmRemove
+            }
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '5px 12px',
+              borderRadius: '6px',
+              border: '1px solid',
+              borderColor: !plugin.isBuiltin && confirmRemove
+                ? '#ef4444'
+                : 'var(--border-color)',
+              background: !plugin.isBuiltin && confirmRemove
+                ? '#ef4444'
+                : 'transparent',
+              color: !plugin.isBuiltin && confirmRemove
                 ? '#fff'
-                : isPresent
-                  ? 'var(--text-secondary)'
-                  : '#fff',
-            cursor: isInstalling ? 'not-allowed' : 'pointer',
-            fontSize: '12px',
-            fontWeight: 500,
-            opacity: isInstalling ? 0.5 : 1,
-            transition: 'all 0.15s ease'
-          }}
-        >
-          {isPresent ? <Trash2 size={13} /> : <Download size={13} />}
-          {isPresent
-            ? confirmRemove && !plugin.isBuiltin
-              ? 'Confirm'
-              : 'Remove'
-            : 'Install'}
-        </button>
+                : 'var(--text-secondary)',
+              cursor: isInstalling ? 'not-allowed' : 'pointer',
+              fontSize: '12px',
+              fontWeight: 500,
+              opacity: isInstalling ? 0.5 : 1,
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <Trash2 size={13} />
+            {!plugin.isBuiltin && confirmRemove ? 'Confirm' : 'Remove'}
+          </button>
+        )}
+
       </div>
     </div>
   )
@@ -457,7 +471,7 @@ export default function PluginMarket({ onBack }: PluginMarketProps): JSX.Element
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '12px 20px',
-          borderBottom: '1px solid var(--border-secondary)',
+          borderBottom: '1px solid var(--border-light)',
           flexShrink: 0,
           gap: '12px'
         }}
@@ -507,7 +521,7 @@ export default function PluginMarket({ onBack }: PluginMarketProps): JSX.Element
               padding: '7px 14px',
               borderRadius: '6px',
               border: 'none',
-              background: 'var(--accent-primary)',
+              background: 'var(--accent)',
               color: '#fff',
               cursor: isInstalling ? 'wait' : 'pointer',
               fontSize: '13px',
@@ -526,7 +540,7 @@ export default function PluginMarket({ onBack }: PluginMarketProps): JSX.Element
               gap: '6px',
               padding: '7px 14px',
               borderRadius: '6px',
-              border: '1px solid var(--border-secondary)',
+              border: '1px solid var(--border-color)',
               background: 'transparent',
               color: 'var(--text-secondary)',
               cursor: 'pointer',
@@ -549,13 +563,13 @@ export default function PluginMarket({ onBack }: PluginMarketProps): JSX.Element
             gap: '8px',
             padding: '8px 20px',
             background: installMessage.startsWith('Installed')
-              ? 'var(--accent-primary-dim, rgba(59, 130, 246, 0.08))'
-              : 'var(--color-error-bg, rgba(239, 68, 68, 0.08))',
-            borderBottom: '1px solid var(--border-secondary)',
+              ? 'var(--bg-tertiary)'
+              : 'rgba(239, 68, 68, 0.08)',
+            borderBottom: '1px solid var(--border-light)',
             fontSize: '13px',
             color: installMessage.startsWith('Installed')
-              ? 'var(--accent-primary)'
-              : 'var(--color-error, #ef4444)',
+              ? 'var(--accent)'
+              : '#ef4444',
             flexShrink: 0
           }}
         >
