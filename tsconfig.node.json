@@ -1,31 +1,19 @@
 {
+  "extends": "@electron-toolkit/tsconfig/tsconfig.node.json",
+  "include": [
+    "electron.vite.config.*",
+    "src/main/**/*",
+    "src/preload/**/*",
+    "src/shared/**/*",
+    "src/plugin-sdk/**/*"
+  ],
   "compilerOptions": {
     "composite": true,
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "target": "ES2022",
-    "lib": ["ES2022"],
-    "types": ["node", "electron-vite/node"],
-    "strict": true,
-    "skipLibCheck": true,
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
+    "types": ["electron-vite/node"],
     "baseUrl": ".",
     "paths": {
-      "@shared": ["packages/shared/src/index.ts"],
-      "@shared/*": ["packages/shared/src/*"],
-      "@plugin-sdk": ["packages/plugin-sdk/src/index.ts"],
-      "@plugin-sdk/*": ["packages/plugin-sdk/src/*"]
+      "@shared/*": ["src/shared/*"],
+      "@plugin-sdk/*": ["src/plugin-sdk/*"]
     }
-  },
-  "include": [
-    "packages/main/src/**/*",
-    "packages/preload/src/**/*",
-    "packages/shared/src/**/*",
-    "packages/plugin-sdk/src/**/*",
-    "electron.vite.config.ts"
-  ]
+  }
 }

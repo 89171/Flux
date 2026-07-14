@@ -5,46 +5,33 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
-    build: {
-      rollupOptions: {
-        input: { index: resolve(__dirname, 'packages/main/src/index.ts') }
-      }
-    },
     resolve: {
       alias: {
-        '@shared': resolve(__dirname, 'packages/shared/src'),
-        '@plugin-sdk': resolve(__dirname, 'packages/plugin-sdk/src')
+        '@shared': resolve('src/shared'),
+        '@plugin-sdk': resolve('src/plugin-sdk')
       }
     }
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
-    build: {
-      rollupOptions: {
-        input: { index: resolve(__dirname, 'packages/preload/src/index.ts') }
-      }
-    },
-    resolve: {
-      alias: {
-        '@shared': resolve(__dirname, 'packages/shared/src')
-      }
-    }
+    plugins: [externalizeDepsPlugin()]
   },
   renderer: {
-    root: resolve(__dirname, 'packages/renderer'),
-    build: {
-      rollupOptions: {
-        input: { index: resolve(__dirname, 'packages/renderer/index.html') }
-      }
-    },
     resolve: {
       alias: {
-        '@renderer': resolve(__dirname, 'packages/renderer/src'),
-        '@shared': resolve(__dirname, 'packages/shared/src'),
-        '@plugin-sdk': resolve(__dirname, 'packages/plugin-sdk/src'),
-        '@plugins': resolve(__dirname, 'plugins')
+        '@renderer': resolve('src/renderer/src'),
+        '@shared': resolve('src/shared'),
+        '@plugin-sdk': resolve('src/plugin-sdk')
       }
     },
-    plugins: [react()]
+    plugins: [react()],
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/renderer/index.html'),
+          note: resolve(__dirname, 'src/renderer/note.html'),
+          devGuide: resolve(__dirname, 'src/renderer/plugin-dev-guide.html')
+        }
+      }
+    }
   }
 })
