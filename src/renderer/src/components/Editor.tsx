@@ -6,10 +6,8 @@
  * Features: drag & drop files, keyboard save shortcut, AI generate, pin to desktop.
  */
 
-import { useCallback, useState, useEffect, useRef } from 'react'
+import { useCallback, useState, useEffect, useRef, lazy, Suspense } from 'react'
 import {
-  Eye,
-  Pencil,
   Save,
   Pin,
   ExternalLink,
@@ -19,27 +17,61 @@ import {
 import MarkdownEditor from './MilkdownEditor'
 import DrawioEditor from './DrawioEditor'
 import MindmapEditor from './MindmapEditor'
-import { marked } from 'marked'
+import WhiteboardEditor from './WhiteboardEditor'
+import ExcalidrawEditor from './ExcalidrawEditor'
+import KanbanEditor from './KanbanEditor'
+import PlantUmlEditor from './PlantUmlEditor'
+import PluginIframeEditor from './PluginIframeEditor'
+// Heavy libs (mermaid ≈1MB, bpmn-js ≈600KB, dmn-js ≈900KB) — code-split
+// them out so users who never open these file types don't pay the
+// download cost. Vite emits a separate chunk per import().
+const MermaidEditor = lazy(() => import('./MermaidEditor'))
+const BpmnEditor = lazy(() => import('./BpmnEditor'))
+const DmnEditor = lazy(() => import('./DmnEditor'))
 import { useFileStore } from '../stores/fileStore'
 import { useAIStore } from '../stores/aiStore'
-import type { NoteFormat } from '@shared/types'
+import { usePluginStore } from '../stores/pluginStore'
+import type { FormatBinding, NoteFormat } from '@shared/types'
+
+/** Placeholder shown while a lazy-loaded editor chunk downloads. */
+function LazyEditorFallback(): JSX.Element {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100%',
+        color: 'var(--text-tertiary)',
+        fontSize: 13
+      }}
+    >
+      Loading editor…
+    </div>
+  )
+}
 
 /**
  * Determines the note format from a file extension.
  */
-function getFormatFromExtension(filename: string): NoteFormat {
+/**
+ * Extension → renderer resolution against the active plugin format map.
+ * Falls back to plaintext when no plugin claims the extension. The map
+ * is authoritative — do NOT re-introduce a hardcoded switch, callers
+ * should consult usePluginStore's `formatMap`.
+ */
+function getFormatFromExtension(
+  filename: string,
+  formatMap: Record<string, FormatBinding>
+): NoteFormat {
   const ext = filename.split('.').pop()?.toLowerCase() || ''
-  switch (ext) {
-    case 'md':
-    case 'markdown':
-      return 'markdown'
-    case 'drawio':
-      return 'drawio'
-    case 'mm':
-      return 'mindmap'
-    default:
-      return 'plaintext'
-  }
+  const binding = formatMap[ext]
+  if (!binding) return 'plaintext'
+  if (binding.kind === 'builtin') return binding.renderer
+  // Plugin-editor extensions label themselves with the raw extension
+  // (e.g. "json") — routing to the iframe editor uses the binding
+  // object directly, not this string.
+  return ext
 }
 
 /**
@@ -54,6 +86,20 @@ function formatLabel(format?: NoteFormat): string {
       return 'DrawIO'
     case 'mindmap':
       return 'Mindmap'
+    case 'whiteboard':
+      return 'Whiteboard'
+    case 'excalidraw':
+      return 'Excalidraw'
+    case 'kanban':
+      return 'Kanban'
+    case 'mermaid':
+      return 'Mermaid'
+    case 'plantuml':
+      return 'PlantUML'
+    case 'bpmn':
+      return 'BPMN'
+    case 'dmn':
+      return 'DMN'
     case 'plaintext':
       return 'TXT'
     default:
@@ -62,15 +108,24 @@ function formatLabel(format?: NoteFormat): string {
 }
 
 export default function Editor(): JSX.Element {
-  const { currentFile, currentContent, setContent, saveFile, isDirty } =
+  const { currentFile, currentContent, currentMtime, setContent, saveFile, isDirty } =
     useFileStore()
-  const { openPanel, generate, isGenerating } = useAIStore()
+  const { openPanel, isGenerating } = useAIStore()
+  const formatMap = usePluginStore((s) => s.formatMap)
 
   const [isDragOver, setIsDragOver] = useState(false)
   const [isPinned, setIsPinned] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  const isMarkdown = currentFile?.format === 'markdown'
+  // Look up the binding for the currently open file. The binding drives
+  // which editor gets mounted; the string `format` field on NoteFile is
+  // only for UI labels (badge, "new file" menu icons).
+  const currentExt = currentFile?.name.split('.').pop()?.toLowerCase() ?? ''
+  const currentBinding: FormatBinding | undefined = currentFile
+    ? formatMap[currentExt]
+    : undefined
+  const isMarkdown =
+    currentBinding?.kind === 'builtin' && currentBinding.renderer === 'markdown'
   const format = currentFile?.format
 
   // Keyboard shortcut: Cmd/Ctrl+S to save
@@ -109,7 +164,7 @@ export default function Editor(): JSX.Element {
       if (files && files.length > 0) {
         const file = files[0] as File & { path?: string }
         if (file.path) {
-          const detectedFormat = getFormatFromExtension(file.name)
+          const detectedFormat = getFormatFromExtension(file.name, formatMap)
           window.painote.window.openNote({
             noteId: file.path,
             notePath: file.path,
@@ -120,7 +175,7 @@ export default function Editor(): JSX.Element {
         }
       }
     },
-    []
+    [formatMap]
   )
 
   // AI Generate handler
@@ -172,11 +227,6 @@ export default function Editor(): JSX.Element {
     },
     [setContent]
   )
-
-  // Render non-markdown preview using marked (fallback)
-  const nonMdPreviewHtml = currentFile && !isMarkdown && currentContent
-    ? marked.parse(currentContent) as string
-    : ''
 
   // Empty state - no file open
   if (!currentFile) {
@@ -363,27 +413,92 @@ export default function Editor(): JSX.Element {
           position: 'relative'
         }}
       >
-        {isMarkdown ? (
+        {currentBinding?.kind === 'plugin-editor' ? (
+          <PluginIframeEditor
+            key={currentFile.path}
+            entryUrl={currentBinding.entryUrl}
+            value={currentContent}
+            onChange={setContent}
+            onRequestSave={saveFile}
+            filePath={currentFile.path}
+            mtime={currentMtime}
+          />
+        ) : isMarkdown ? (
           <MarkdownEditor
             key={currentFile.path}
             value={currentContent}
             onChange={(md) => setContent(md)}
             className="markdown-editor-wrapper"
           />
-        ) : format === 'drawio' ? (
+        ) : currentBinding?.kind === 'builtin' && currentBinding.renderer === 'drawio' ? (
           <DrawioEditor
             key={currentFile.path}
             value={currentContent}
             onChange={(xml) => setContent(xml)}
             className="drawio-editor-wrapper"
           />
-        ) : format === 'mindmap' ? (
+        ) : currentBinding?.kind === 'builtin' && currentBinding.renderer === 'mindmap' ? (
           <MindmapEditor
             key={currentFile.path}
             value={currentContent}
             onChange={(data) => setContent(data)}
             className="mindmap-editor-wrapper"
           />
+        ) : currentBinding?.kind === 'builtin' && currentBinding.renderer === 'whiteboard' ? (
+          <WhiteboardEditor
+            key={currentFile.path}
+            value={currentContent}
+            onChange={(data) => setContent(data)}
+            className="whiteboard-editor-wrapper"
+          />
+        ) : currentBinding?.kind === 'builtin' && currentBinding.renderer === 'excalidraw' ? (
+          <ExcalidrawEditor
+            key={currentFile.path}
+            value={currentContent}
+            onChange={(data) => setContent(data)}
+            className="excalidraw-editor-wrapper"
+          />
+        ) : currentBinding?.kind === 'builtin' && currentBinding.renderer === 'kanban' ? (
+          <KanbanEditor
+            key={currentFile.path}
+            value={currentContent}
+            onChange={(data) => setContent(data)}
+            className="kanban-editor-wrapper"
+          />
+        ) : currentBinding?.kind === 'builtin' && currentBinding.renderer === 'plantuml' ? (
+          <PlantUmlEditor
+            key={currentFile.path}
+            value={currentContent}
+            onChange={(data) => setContent(data)}
+            className="plantuml-editor-wrapper"
+          />
+        ) : currentBinding?.kind === 'builtin' && currentBinding.renderer === 'mermaid' ? (
+          <Suspense fallback={<LazyEditorFallback />}>
+            <MermaidEditor
+              key={currentFile.path}
+              value={currentContent}
+              onChange={(data) => setContent(data)}
+              className="mermaid-editor-wrapper"
+            />
+          </Suspense>
+        ) : currentBinding?.kind === 'builtin' && currentBinding.renderer === 'bpmn' ? (
+          <Suspense fallback={<LazyEditorFallback />}>
+            <BpmnEditor
+              key={currentFile.path}
+              value={currentContent}
+              onChange={(data) => setContent(data)}
+              className="bpmn-editor-wrapper"
+            />
+          </Suspense>
+        ) : currentBinding?.kind === 'builtin' && currentBinding.renderer === 'dmn' ? (
+          <Suspense fallback={<LazyEditorFallback />}>
+            <DmnEditor
+              key={currentFile.path}
+              value={currentContent}
+              onChange={(data) => setContent(data)}
+              className="dmn-editor-wrapper"
+            />
+          </Suspense>
         ) : (
           <textarea
             ref={textareaRef}

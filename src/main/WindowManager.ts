@@ -1,4 +1,4 @@
-import { BrowserWindow, screen, shell, type BrowserWindowConstructorOptions } from 'electron'
+import { BrowserWindow, screen, type BrowserWindowConstructorOptions } from 'electron'
 import { join } from 'path'
 import AutoLaunch from 'auto-launch'
 import {
@@ -21,6 +21,8 @@ export interface ManagedWindow {
   collapseTimer: NodeJS.Timeout | null
   isCollapsed: boolean
   originalBounds: { x: number; y: number; width: number; height: number }
+  /** Handler currently bound to the window's move+resize events, if any. */
+  edgeCollapseListener: (() => void) | null
 }
 
 export interface OpenNoteOptions {
@@ -61,7 +63,13 @@ export class WindowManager {
       autoHideMenuBar: true,
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
-        sandbox: false
+        // Security posture: sandbox the renderer, isolate contexts, and
+        // disable node integration. The preload only touches contextBridge
+        // and ipcRenderer, both of which survive the sandbox.
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+        webSecurity: true
       }
     })
 
@@ -101,7 +109,13 @@ export class WindowManager {
       opacity: opacity,
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
-        sandbox: false
+        // Security posture: sandbox the renderer, isolate contexts, and
+        // disable node integration. The preload only touches contextBridge
+        // and ipcRenderer, both of which survive the sandbox.
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+        webSecurity: true
       }
     }
 
@@ -118,7 +132,8 @@ export class WindowManager {
       autoCollapse,
       collapseTimer: null,
       isCollapsed: false,
-      originalBounds: win.getBounds()
+      originalBounds: win.getBounds(),
+      edgeCollapseListener: null
     }
 
     win.on('ready-to-show', () => {
@@ -219,6 +234,8 @@ export class WindowManager {
       }
       // Clear expand check timer
       this.stopExpandCheck(noteId)
+      // Detach move/resize listeners so re-enabling won't double-register
+      this.teardownAutoCollapse(managed)
       // Expand if currently collapsed
       if (managed.isCollapsed) {
         this.expandWindow(managed)
@@ -227,13 +244,21 @@ export class WindowManager {
   }
 
   private setupAutoCollapse(managed: ManagedWindow): void {
-    managed.window.on('move', () => {
-      this.checkEdgeCollapse(managed)
-    })
+    // Idempotent: bail if a listener is already bound so toggling auto-
+    // collapse repeatedly can't stack up 'move'/'resize' handlers.
+    if (managed.edgeCollapseListener) return
+    const listener = (): void => this.checkEdgeCollapse(managed)
+    managed.edgeCollapseListener = listener
+    managed.window.on('move', listener)
+    managed.window.on('resize', listener)
+  }
 
-    managed.window.on('resize', () => {
-      this.checkEdgeCollapse(managed)
-    })
+  private teardownAutoCollapse(managed: ManagedWindow): void {
+    const listener = managed.edgeCollapseListener
+    if (!listener) return
+    managed.window.removeListener('move', listener)
+    managed.window.removeListener('resize', listener)
+    managed.edgeCollapseListener = null
   }
 
   private checkEdgeCollapse(managed: ManagedWindow): void {
@@ -368,6 +393,7 @@ export class WindowManager {
       clearTimeout(managed.collapseTimer)
     }
     this.stopExpandCheck(noteId)
+    this.teardownAutoCollapse(managed)
 
     managed.window.close()
     this.noteWindows.delete(noteId)
@@ -379,6 +405,7 @@ export class WindowManager {
         clearTimeout(managed.collapseTimer)
       }
       this.stopExpandCheck(noteId)
+      this.teardownAutoCollapse(managed)
       managed.window.close()
     }
     this.noteWindows.clear()

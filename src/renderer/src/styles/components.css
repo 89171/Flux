@@ -295,6 +295,29 @@
 .context-menu-item.danger:hover { background: #fef0f0; }
 .context-menu-divider { height: 1px; background: var(--border-light); margin: 4px 0; }
 
+/* Submenu — attached to a .has-submenu item, opens to the right */
+.context-menu-item.has-submenu { position: relative; }
+.context-submenu {
+  position: absolute;
+  left: 100%;
+  top: -4px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  z-index: 10001;
+  min-width: 180px;
+  animation: slideUp 0.08s ease;
+}
+.context-submenu-icon { display: flex; align-items: center; flex-shrink: 0; }
+.context-submenu-ext {
+  font-size: 11px;
+  opacity: 0.45;
+  font-family: var(--font-mono, monospace);
+  flex-shrink: 0;
+}
+
 /* ============ Editor ============ */
 .editor-container {
   flex: 1; display: flex; flex-direction: column;
@@ -505,7 +528,7 @@
   text-align: center; gap: 8px;
 }
 
-/* ============ Tiptap WYSIWYG Markdown Editor ============ */
+/* ============ Milkdown WYSIWYG Markdown Editor ============ */
 .markdown-editor-wrapper {
   width: 100%;
   height: 100%;
@@ -513,7 +536,7 @@
   user-select: text;
 }
 
-.markdown-editor-wrapper .tiptap-editor {
+.markdown-editor-wrapper .milkdown {
   max-width: 800px;
   margin: 0 auto;
   padding: 32px 48px;
@@ -521,44 +544,100 @@
   font-size: 15px;
   line-height: 1.7;
   color: var(--text-primary);
+  background: transparent;
 }
 
-.markdown-editor-wrapper .tiptap-editor h1 { font-size: 28px; font-weight: 700; margin: 24px 0 12px; }
-.markdown-editor-wrapper .tiptap-editor h2 { font-size: 22px; font-weight: 700; margin: 20px 0 10px; }
-.markdown-editor-wrapper .tiptap-editor h3 { font-size: 18px; font-weight: 600; margin: 16px 0 8px; }
-.markdown-editor-wrapper .tiptap-editor p { margin: 8px 0; }
-.markdown-editor-wrapper .tiptap-editor ul,
-.markdown-editor-wrapper .tiptap-editor ol { margin: 8px 0; padding-left: 24px; }
-.markdown-editor-wrapper .tiptap-editor li { margin: 4px 0; }
-.markdown-editor-wrapper .tiptap-editor code {
-  background: var(--bg-tertiary); padding: 2px 6px;
-  border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 0.9em;
+.markdown-editor-wrapper .milkdown .ProseMirror {
+  outline: none;
+  min-height: 200px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
 }
-.markdown-editor-wrapper .tiptap-editor pre {
-  background: #1a1a1a; color: #e0e0e0; padding: 16px;
-  border-radius: var(--radius-md); overflow-x: auto; margin: 12px 0;
-}
-.markdown-editor-wrapper .tiptap-editor pre code { background: none; color: inherit; padding: 0; }
-.markdown-editor-wrapper .tiptap-editor blockquote {
-  border-left: 3px solid var(--border-color); padding-left: 16px;
-  margin: 12px 0; color: var(--text-secondary);
-}
-.markdown-editor-wrapper .tiptap-editor a { color: var(--accent-primary); text-decoration: underline; cursor: pointer; }
-.markdown-editor-wrapper .tiptap-editor table { border-collapse: collapse; margin: 12px 0; }
-.markdown-editor-wrapper .tiptap-editor th,
-.markdown-editor-wrapper .tiptap-editor td { border: 1px solid var(--border-light); padding: 8px 12px; }
-.markdown-editor-wrapper .tiptap-editor img { max-width: 100%; border-radius: var(--radius-md); }
-.markdown-editor-wrapper .tiptap-editor hr { border: none; border-top: 1px solid var(--border-light); margin: 16px 0; }
 
-/* Task list checkboxes */
-.markdown-editor-wrapper .tiptap-editor ul[data-type="taskList"] { list-style: none; padding-left: 0; }
-.markdown-editor-wrapper .tiptap-editor ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 8px; }
-.markdown-editor-wrapper .tiptap-editor ul[data-type="taskList"] li > div { flex: 1; }
-.markdown-editor-wrapper .tiptap-editor ul[data-type="taskList"] li label { margin-top: 4px; }
-.markdown-editor-wrapper .tiptap-editor ul[data-type="taskList"] li input[type="checkbox"] { cursor: pointer; }
+.markdown-editor-wrapper .milkdown .ProseMirror > :first-child { margin-top: 0; }
+.markdown-editor-wrapper .milkdown h1 { font-size: 28px; font-weight: 700; margin: 24px 0 12px; }
+.markdown-editor-wrapper .milkdown h2 { font-size: 22px; font-weight: 700; margin: 20px 0 10px; }
+.markdown-editor-wrapper .milkdown h3 { font-size: 18px; font-weight: 600; margin: 16px 0 8px; }
+.markdown-editor-wrapper .milkdown h4 { font-size: 16px; font-weight: 600; margin: 14px 0 6px; }
+.markdown-editor-wrapper .milkdown p { margin: 8px 0; }
+.markdown-editor-wrapper .milkdown ul,
+.markdown-editor-wrapper .milkdown ol { margin: 8px 0; padding-left: 24px; }
+.markdown-editor-wrapper .milkdown li { margin: 4px 0; }
+.markdown-editor-wrapper .milkdown li > p { margin: 0; }
 
-/* Placeholder */
-.markdown-editor-wrapper .tiptap-editor.tiptap-empty p:first-child::before {
+.markdown-editor-wrapper .milkdown code {
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+.markdown-editor-wrapper .milkdown pre,
+.markdown-editor-wrapper .milkdown .code-fence,
+.markdown-editor-wrapper .milkdown [data-type="code_block"] {
+  background: #1a1a1a;
+  color: #e0e0e0;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  margin: 12px 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.markdown-editor-wrapper .milkdown pre code { background: none; color: inherit; padding: 0; }
+
+.markdown-editor-wrapper .milkdown blockquote {
+  border-left: 3px solid var(--border-color, var(--border-light));
+  padding-left: 16px;
+  margin: 12px 0;
+  color: var(--text-secondary);
+}
+.markdown-editor-wrapper .milkdown a {
+  color: var(--accent-primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.markdown-editor-wrapper .milkdown table {
+  border-collapse: collapse;
+  margin: 12px 0;
+  width: 100%;
+}
+.markdown-editor-wrapper .milkdown th,
+.markdown-editor-wrapper .milkdown td {
+  border: 1px solid var(--border-light);
+  padding: 8px 12px;
+  text-align: left;
+}
+.markdown-editor-wrapper .milkdown th {
+  background: var(--bg-tertiary);
+  font-weight: 600;
+}
+.markdown-editor-wrapper .milkdown img { max-width: 100%; border-radius: var(--radius-md); }
+.markdown-editor-wrapper .milkdown hr {
+  border: none;
+  border-top: 1px solid var(--border-light);
+  margin: 16px 0;
+}
+
+/* GFM task list (rendered as list items with a leading checkbox input) */
+.markdown-editor-wrapper .milkdown li[data-checked],
+.markdown-editor-wrapper .milkdown li.task-list-item {
+  list-style: none;
+  margin-left: -24px;
+  padding-left: 4px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.markdown-editor-wrapper .milkdown li[data-checked] > input[type="checkbox"],
+.markdown-editor-wrapper .milkdown li.task-list-item > input[type="checkbox"] {
+  margin-top: 6px;
+  cursor: pointer;
+}
+
+/* Placeholder — Milkdown emits `.crepe-placeholder` or an empty first paragraph */
+.markdown-editor-wrapper .milkdown .ProseMirror p.is-editor-empty:first-child::before,
+.markdown-editor-wrapper .milkdown .ProseMirror.is-editor-empty::before {
   content: attr(data-placeholder);
   color: var(--text-disabled);
   pointer-events: none;
@@ -566,12 +645,8 @@
   height: 0;
 }
 
-/* ProseMirror focus outline */
-.markdown-editor-wrapper .ProseMirror { outline: none; min-height: 200px; }
-.markdown-editor-wrapper .ProseMirror p:first-child { margin-top: 0; }
-
-/* Tiptap in note window (compact) */
-.note-window .markdown-editor-wrapper .tiptap-editor {
+/* Compact layout when embedded in a pinned note window */
+.note-window .markdown-editor-wrapper .milkdown {
   padding: 16px 20px;
   font-size: 14px;
 }

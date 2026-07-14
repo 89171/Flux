@@ -1,0 +1,17 @@
+{
+  "id": "whiteboard",
+  "name": "Whiteboard",
+  "version": "1.0.0",
+  "author": "PaiNote",
+  "description": "Built-in whiteboard for freeform drawing, sticky notes, and quick sketches — powered by tldraw.",
+  "type": "format",
+  "extensions": ["tldr"],
+  "primaryExtension": "tldr",
+  "formatBinding": "whiteboard",
+  "main": "main.js",
+  "icon": "Palette",
+  "fileIcon": "Palette",
+  "builtin": true,
+  "minAppVersion": "1.0.0",
+  "sdkVersion": "1.0.0"
+}

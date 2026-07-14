@@ -1,0 +1,18 @@
+{
+  "id": "plantuml",
+  "name": "PlantUML",
+  "version": "1.0.0",
+  "author": "PaiNote",
+  "description": "PlantUML source with live preview rendered by the official PlantUML server (network required). Bundled but not installed by default — enable from the market.",
+  "type": "format",
+  "extensions": ["puml"],
+  "primaryExtension": "puml",
+  "formatBinding": "plantuml",
+  "main": "main.js",
+  "icon": "Waypoints",
+  "fileIcon": "Waypoints",
+  "builtin": true,
+  "autoActivate": false,
+  "minAppVersion": "1.0.0",
+  "sdkVersion": "1.0.0"
+}

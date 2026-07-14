@@ -1,12 +1,40 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '../shared/ipc-channels'
-import type { NoteFile, PluginInfo, AIRequest, AIResponse, AppSettings } from '../shared/types'
+import type {
+  NoteFile,
+  PluginInfo,
+  AIRequest,
+  AIResponse,
+  AppSettings,
+  FormatBinding,
+  FileReadMetaResult,
+  FileWriteResult,
+  FileChangedEvent
+} from '../shared/types'
 
 const api = {
   file: {
     getTree: (): Promise<NoteFile> => ipcRenderer.invoke(IPC.FILE_TREE),
     read: (path: string): Promise<string> => ipcRenderer.invoke(IPC.FILE_READ, path),
+    readMeta: (path: string): Promise<FileReadMetaResult> =>
+      ipcRenderer.invoke(IPC.FILE_READ_META, path),
     write: (path: string, content: string): Promise<boolean> => ipcRenderer.invoke(IPC.FILE_WRITE, path, content),
+    writeGuarded: (
+      path: string,
+      content: string,
+      expectedMtime: number | null
+    ): Promise<FileWriteResult> =>
+      ipcRenderer.invoke(IPC.FILE_WRITE_GUARDED, path, content, expectedMtime),
+    onChanged: (callback: (payload: FileChangedEvent) => void): (() => void) => {
+      const handler = (_: unknown, payload: FileChangedEvent) => callback(payload)
+      ipcRenderer.on(IPC.FILE_CHANGED_EVENT, handler)
+      return () => ipcRenderer.removeListener(IPC.FILE_CHANGED_EVENT, handler)
+    },
+    onTreeChanged: (callback: (tree: NoteFile[]) => void): (() => void) => {
+      const handler = (_: unknown, tree: NoteFile[]) => callback(tree)
+      ipcRenderer.on(IPC.FILE_TREE_CHANGED_EVENT, handler)
+      return () => ipcRenderer.removeListener(IPC.FILE_TREE_CHANGED_EVENT, handler)
+    },
     create: (path: string, content?: string, isDir?: boolean): Promise<NoteFile> => ipcRenderer.invoke(IPC.FILE_CREATE, path, content, isDir),
     delete: (path: string): Promise<boolean> => ipcRenderer.invoke(IPC.FILE_DELETE, path),
     rename: (oldPath: string, newPath: string): Promise<NoteFile> => ipcRenderer.invoke(IPC.FILE_RENAME, oldPath, newPath),
@@ -34,8 +62,22 @@ const api = {
     uninstall: (pluginId: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke(IPC.PLUGIN_UNINSTALL, pluginId),
     activate: (pluginId: string): Promise<boolean> => ipcRenderer.invoke(IPC.PLUGIN_ACTIVATE, pluginId),
     deactivate: (pluginId: string): Promise<boolean> => ipcRenderer.invoke(IPC.PLUGIN_DEACTIVATE, pluginId),
+    setEnabled: (
+      pluginId: string,
+      enabled: boolean
+    ): Promise<{ success: boolean; plugin?: PluginInfo; error?: string }> =>
+      ipcRenderer.invoke(IPC.PLUGIN_SET_ENABLED, pluginId, enabled),
     getManifest: (pluginId: string): Promise<PluginInfo | null> => ipcRenderer.invoke(IPC.PLUGIN_GET_MANIFEST, pluginId),
     openDevGuide: (): Promise<boolean> => ipcRenderer.invoke(IPC.PLUGIN_OPEN_DEV_GUIDE),
+    getFormatMap: (): Promise<Record<string, FormatBinding>> =>
+      ipcRenderer.invoke(IPC.PLUGIN_GET_FORMAT_MAP),
+    onFormatMapChanged: (
+      callback: (map: Record<string, FormatBinding>) => void
+    ): (() => void) => {
+      const handler = (_: unknown, map: Record<string, FormatBinding>) => callback(map)
+      ipcRenderer.on(IPC.PLUGIN_FORMAT_MAP_CHANGED_EVENT, handler)
+      return () => ipcRenderer.removeListener(IPC.PLUGIN_FORMAT_MAP_CHANGED_EVENT, handler)
+    },
     onEvent: (callback: (data: { pluginId: string; event: string; data: unknown }) => void) => {
       const handler = (_: unknown, data: { pluginId: string; event: string; data: unknown }) => callback(data)
       ipcRenderer.on('plugin:event', handler)
@@ -60,7 +102,15 @@ const api = {
   },
   app: {
     getVersion: (): Promise<string> => ipcRenderer.invoke(IPC.APP_GET_VERSION),
-    getPaths: (): Promise<{ userData: string; documents: string; plugins: string; workspace: string }> => ipcRenderer.invoke(IPC.APP_GET_PATHS)
+    getPaths: (): Promise<{
+      userData: string
+      documents: string
+      downloads: string
+      desktop: string
+      workspace: string
+      builtinPlugins: string
+      userPlugins: string
+    }> => ipcRenderer.invoke(IPC.APP_GET_PATHS)
   },
   on: {
     noteLoaded: (callback: (data: unknown) => void) => {

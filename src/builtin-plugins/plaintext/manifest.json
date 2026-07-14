@@ -6,8 +6,12 @@
   "description": "Built-in plain text editor for .txt files.",
   "type": "format",
   "extensions": ["txt"],
+  "primaryExtension": "txt",
+  "formatBinding": "plaintext",
   "main": "main.js",
   "icon": "FileText",
+  "fileIcon": "FileText",
   "builtin": true,
-  "minAppVersion": "1.0.0"
+  "minAppVersion": "1.0.0",
+  "sdkVersion": "1.0.0"
 }

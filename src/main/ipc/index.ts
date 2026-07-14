@@ -7,8 +7,24 @@ import type { PluginManager } from '../PluginManager'
 import type { PluginInstaller } from '../PluginInstaller'
 import type { FileSystemManager } from '../FileSystemManager'
 import type { AIService } from '../AIService'
-import { getSettings, setSettings, updateAISettings } from '../SettingsStore'
-import type { AIRequest, AppSettings, NoteFormat } from '@shared/types'
+import { getSettings, setSettings, setPluginEnabled, updateAISettings } from '../SettingsStore'
+import type {
+  AIRequest,
+  AppSettings,
+  FileChangedEvent,
+  NoteFormat
+} from '@shared/types'
+
+function broadcastFileChanged(
+  senderWebContentsId: number,
+  payload: FileChangedEvent
+): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.webContents.id === senderWebContentsId) continue
+    if (win.isDestroyed()) continue
+    win.webContents.send(IPC.FILE_CHANGED_EVENT, payload)
+  }
+}
 
 export function registerIPC(
   windowManager: WindowManager,
@@ -27,11 +43,47 @@ export function registerIPC(
     return fsManager.readFile(relativePath)
   })
 
+  ipcMain.handle(IPC.FILE_READ_META, async (_event, relativePath: string) => {
+    return fsManager.readFileWithMeta(relativePath)
+  })
+
   ipcMain.handle(
     IPC.FILE_WRITE,
-    async (_event, relativePath: string, content: string) => {
+    async (event, relativePath: string, content: string) => {
       fsManager.writeFile(relativePath, content)
+      // Best-effort mtime read for the broadcast; failures here shouldn't
+      // fail the write itself since the file was persisted.
+      try {
+        const { mtime } = fsManager.readFileWithMeta(relativePath)
+        broadcastFileChanged(event.sender.id, {
+          path: relativePath,
+          mtime,
+          content
+        })
+      } catch (err) {
+        console.warn('Failed to broadcast file change:', err)
+      }
       return true
+    }
+  )
+
+  ipcMain.handle(
+    IPC.FILE_WRITE_GUARDED,
+    async (
+      event,
+      relativePath: string,
+      content: string,
+      expectedMtime: number | null
+    ) => {
+      const result = fsManager.writeFileGuarded(relativePath, content, expectedMtime)
+      if (result.ok) {
+        broadcastFileChanged(event.sender.id, {
+          path: relativePath,
+          mtime: result.mtime,
+          content
+        })
+      }
+      return result
     }
   )
 
@@ -149,16 +201,35 @@ export function registerIPC(
   })
 
   ipcMain.handle(IPC.PLUGIN_INSTALL, async () => {
-    return pluginInstaller.installFromPicker()
+    try {
+      const plugin = await pluginInstaller.installFromPicker()
+      if (!plugin) {
+        // User dismissed the directory picker — distinguish this from a real
+        // error so the renderer doesn't show a scary failure toast.
+        return { success: false, canceled: true }
+      }
+      return { success: true, plugin }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   ipcMain.handle(IPC.PLUGIN_LOAD_LOCAL, async (_event, sourcePath: string) => {
-    return pluginInstaller.installFromDirectory(sourcePath)
+    try {
+      const plugin = await pluginInstaller.installFromDirectory(sourcePath)
+      return { success: true, plugin }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   ipcMain.handle(IPC.PLUGIN_UNINSTALL, async (_event, pluginId: string) => {
-    await pluginInstaller.uninstall(pluginId)
-    return true
+    try {
+      await pluginInstaller.uninstall(pluginId)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   ipcMain.handle(IPC.PLUGIN_ACTIVATE, async (_event, pluginId: string) => {
@@ -171,9 +242,55 @@ export function registerIPC(
     return pluginManager.getPlugin(pluginId)?.info
   })
 
+  ipcMain.handle(
+    IPC.PLUGIN_SET_ENABLED,
+    async (_event, pluginId: string, enabled: boolean) => {
+      try {
+        setPluginEnabled(pluginId, enabled)
+        const loaded = pluginManager.getPlugin(pluginId)
+        if (!loaded) return { success: false, error: `Plugin not found: ${pluginId}` }
+        // Reconcile runtime state with the new preference. If the plugin
+        // isn't installed yet (opt-in builtin never activated) `activate`
+        // reads its manifest fresh; if it's active and being disabled,
+        // deactivate cleans up listeners + format bindings.
+        if (enabled && loaded.state !== 'active') {
+          await pluginManager.activate(pluginId)
+        } else if (!enabled && loaded.state === 'active') {
+          await pluginManager.deactivate(pluginId)
+        }
+        return { success: true, plugin: pluginManager.getPlugin(pluginId)?.info }
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
+
   ipcMain.handle(IPC.PLUGIN_GET_MANIFEST, async (_event, pluginId: string) => {
     const loaded = pluginManager.getPlugin(pluginId)
     return loaded?.info || null
+  })
+
+  ipcMain.handle(IPC.PLUGIN_GET_FORMAT_MAP, async () => {
+    return pluginManager.getFormatMap()
+  })
+
+  // Broadcast format-map changes so renderers can update their extension →
+  // renderer lookup as plugins are activated / deactivated / installed.
+  pluginManager.onFormatMapChanged(() => {
+    const payload = pluginManager.getFormatMap()
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed()) continue
+      win.webContents.send(IPC.PLUGIN_FORMAT_MAP_CHANGED_EVENT, payload)
+    }
+  })
+
+  // Broadcast file-tree changes (mutation or external filesystem event) so
+  // renderers stop having to poll FILE_TREE after every create/delete.
+  fsManager.onTreeChanged((tree) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed()) continue
+      win.webContents.send(IPC.FILE_TREE_CHANGED_EVENT, tree)
+    }
   })
 
   ipcMain.handle(IPC.PLUGIN_OPEN_DEV_GUIDE, async () => {
@@ -182,7 +299,10 @@ export function registerIPC(
       height: 700,
       title: 'Plugin Development Guide',
       webPreferences: {
-        sandbox: false
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+        webSecurity: true
       }
     })
 
@@ -243,27 +363,53 @@ export function registerIPC(
   })
 
   // ============ Dialog IPC ============
+  // Handlers preserve the opts declared on the preload surface (title,
+  // filters, defaultPath). Previously these were silently dropped.
 
-  ipcMain.handle(IPC.DIALOG_OPEN_FILE, async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ['openFile']
-    })
-    return result.canceled ? null : result.filePaths
-  })
+  ipcMain.handle(
+    IPC.DIALOG_OPEN_FILE,
+    async (
+      _event,
+      opts?: { title?: string; filters?: Array<{ name: string; extensions: string[] }> }
+    ) => {
+      const result = await dialog.showOpenDialog({
+        properties: ['openFile'],
+        ...(opts?.title ? { title: opts.title } : {}),
+        ...(opts?.filters ? { filters: opts.filters } : {})
+      })
+      return result.canceled ? null : result.filePaths[0] ?? null
+    }
+  )
 
-  ipcMain.handle(IPC.DIALOG_OPEN_DIRECTORY, async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ['openDirectory']
-    })
-    return result.canceled ? null : result.filePaths
-  })
+  ipcMain.handle(
+    IPC.DIALOG_OPEN_DIRECTORY,
+    async (_event, opts?: { title?: string }) => {
+      const result = await dialog.showOpenDialog({
+        properties: ['openDirectory'],
+        ...(opts?.title ? { title: opts.title } : {})
+      })
+      return result.canceled ? null : result.filePaths[0] ?? null
+    }
+  )
 
-  ipcMain.handle(IPC.DIALOG_SAVE_FILE, async (_event, defaultName?: string) => {
-    const result = await dialog.showSaveDialog({
-      defaultPath: defaultName
-    })
-    return result.canceled ? null : result.filePath
-  })
+  ipcMain.handle(
+    IPC.DIALOG_SAVE_FILE,
+    async (
+      _event,
+      opts?: {
+        title?: string
+        defaultPath?: string
+        filters?: Array<{ name: string; extensions: string[] }>
+      }
+    ) => {
+      const result = await dialog.showSaveDialog({
+        ...(opts?.title ? { title: opts.title } : {}),
+        ...(opts?.defaultPath ? { defaultPath: opts.defaultPath } : {}),
+        ...(opts?.filters ? { filters: opts.filters } : {})
+      })
+      return result.canceled ? null : result.filePath ?? null
+    }
+  )
 
   // ============ App IPC ============
 

@@ -4,16 +4,13 @@ export const DEFAULT_WORKSPACE = 'PaiNoteWorkspace'
 export const BUILTIN_PLUGINS_DIR = 'builtin-plugins'
 export const USER_PLUGINS_DIR = 'plugins'
 
-export const EXTENSION_FORMAT_MAP: Record<string, string> = {
-  '.md': 'markdown',
-  '.markdown': 'markdown',
-  '.mdx': 'markdown',
-  '.drawio': 'drawio',
-  '.xml': 'drawio',
-  '.mm': 'mindmap',
-  '.mindmap': 'mindmap',
-  '.txt': 'plaintext'
-}
+/**
+ * Plugin SDK ABI version. Bump the major when we change the shape of
+ * PluginContext / PluginAPI / lifecycle hooks in a way that would break
+ * existing plugins. Plugin authors declare `sdkVersion` in their manifest;
+ * mismatched majors are refused at load time.
+ */
+export const SDK_ABI_VERSION = '1.0.0'
 
 export const DEFAULT_PIN_CONFIG = {
   alwaysOnTop: true,

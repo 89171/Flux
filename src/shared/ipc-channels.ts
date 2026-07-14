@@ -1,12 +1,18 @@
 export const IPC = {
   FILE_READ: 'file:read',
+  FILE_READ_META: 'file:readMeta',
   FILE_WRITE: 'file:write',
+  FILE_WRITE_GUARDED: 'file:writeGuarded',
   FILE_CREATE: 'file:create',
   FILE_DELETE: 'file:delete',
   FILE_RENAME: 'file:rename',
   FILE_TREE: 'file:tree',
   FILE_MOVE: 'file:move',
   FILE_OPEN_EXTERNAL: 'file:openExternal',
+  /** Broadcast event name (not invoked). Payload: FileChangedEvent. */
+  FILE_CHANGED_EVENT: 'file:changed',
+  /** Broadcast event when the file tree structure changes. Payload: NoteFile[]. */
+  FILE_TREE_CHANGED_EVENT: 'file:treeChanged',
   WINDOW_PIN: 'window:pin',
   WINDOW_UNPIN: 'window:unpin',
   WINDOW_SET_OPACITY: 'window:setOpacity',
@@ -21,9 +27,14 @@ export const IPC = {
   PLUGIN_UNINSTALL: 'plugin:uninstall',
   PLUGIN_ACTIVATE: 'plugin:activate',
   PLUGIN_DEACTIVATE: 'plugin:deactivate',
+  /** Persist the user's on/off choice for a builtin plugin. */
+  PLUGIN_SET_ENABLED: 'plugin:setEnabled',
   PLUGIN_LOAD_LOCAL: 'plugin:loadLocal',
   PLUGIN_GET_MANIFEST: 'plugin:getManifest',
   PLUGIN_OPEN_DEV_GUIDE: 'plugin:openDevGuide',
+  PLUGIN_GET_FORMAT_MAP: 'plugin:getFormatMap',
+  /** Broadcast event when the extension → renderer map changes. */
+  PLUGIN_FORMAT_MAP_CHANGED_EVENT: 'plugin:formatMapChanged',
   AI_GENERATE: 'ai:generate',
   AI_CHAT: 'ai:chat',
   AI_TRANSCRIBE: 'ai:transcribe',

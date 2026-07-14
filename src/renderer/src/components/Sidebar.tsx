@@ -39,7 +39,24 @@ import {
   Network,
   Workflow,
   FileType,
-  FolderOpen as FolderOpenIcon
+  FolderOpen as FolderOpenIcon,
+  BookOpen,
+  Braces,
+  Code2,
+  Image as ImageIcon,
+  Music,
+  Notebook,
+  Palette,
+  Presentation,
+  Table,
+  Terminal,
+  Video,
+  ScrollText,
+  Sheet,
+  GitBranch,
+  GitMerge,
+  LayoutGrid,
+  Waypoints
 } from 'lucide-react'
 import type { NoteFile, NoteFormat } from '@shared/types'
 import { useFileStore } from '../stores/fileStore'
@@ -64,16 +81,8 @@ interface FileTypeOption {
   format: NoteFormat
   label: string
   extension: string
-  icon?: string // resolved file:// URL from plugin manifest
+  icon?: string // resolved file:// URL or lucide icon name
 }
-
-/** Built-in file types always available regardless of plugins. */
-const BUILTIN_FILE_TYPES: FileTypeOption[] = [
-  { format: 'markdown', label: 'Markdown', extension: 'md' },
-  { format: 'plaintext', label: 'Plain Text', extension: 'txt' },
-  { format: 'drawio', label: 'DrawIO', extension: 'drawio' },
-  { format: 'mindmap', label: 'Mindmap', extension: 'mm' }
-]
 
 /** Lucide icon component to render for a built-in format (no plugin icon). */
 function BuiltinFormatIcon({ format, size = 16 }: { format: NoteFormat; size?: number }) {
@@ -84,6 +93,20 @@ function BuiltinFormatIcon({ format, size = 16 }: { format: NoteFormat; size?: n
       return <Workflow size={size} />
     case 'mindmap':
       return <Network size={size} />
+    case 'whiteboard':
+      return <Palette size={size} />
+    case 'excalidraw':
+      return <Presentation size={size} />
+    case 'kanban':
+      return <LayoutGrid size={size} />
+    case 'mermaid':
+      return <GitMerge size={size} />
+    case 'plantuml':
+      return <Waypoints size={size} />
+    case 'bpmn':
+      return <Workflow size={size} />
+    case 'dmn':
+      return <Table size={size} />
     case 'plaintext':
       return <FileText size={size} />
     default:
@@ -91,7 +114,16 @@ function BuiltinFormatIcon({ format, size = 16 }: { format: NoteFormat; size?: n
   }
 }
 
-/** Renders a plugin icon — supports file:// URLs and lucide icon names. */
+/**
+ * Renders an icon value coming from a plugin manifest.
+ *   - Values starting with `file://` (or `http`) are image URLs.
+ *   - Otherwise we look the value up in a whitelist of lucide icon names.
+ *
+ * Whitelisted because the value is embedded verbatim into a React tree —
+ * we don't do dynamic component lookup against the raw lucide barrel.
+ * When adding entries, keep the alias for the icon component so third
+ * parties can pick any of these without needing to ship an SVG.
+ */
 function PluginIconRenderer({ icon, size = 16 }: { icon?: string; size?: number }) {
   if (!icon) return <FileText size={size} />
   if (icon.startsWith('file://') || icon.startsWith('http')) {
@@ -99,9 +131,27 @@ function PluginIconRenderer({ icon, size = 16 }: { icon?: string; size?: number 
   }
   const iconMap: Record<string, React.ReactNode> = {
     FileText: <FileText size={size} />,
-    Network: <Network size={size} />,
-    GitBranch: <Workflow size={size} />,
     FileCode: <FileCode size={size} />,
+    FileType: <FileType size={size} />,
+    ScrollText: <ScrollText size={size} />,
+    Notebook: <Notebook size={size} />,
+    BookOpen: <BookOpen size={size} />,
+    Network: <Network size={size} />,
+    Workflow: <Workflow size={size} />,
+    GitBranch: <GitBranch size={size} />,
+    Braces: <Braces size={size} />,
+    Code2: <Code2 size={size} />,
+    Terminal: <Terminal size={size} />,
+    Image: <ImageIcon size={size} />,
+    Music: <Music size={size} />,
+    Video: <Video size={size} />,
+    Palette: <Palette size={size} />,
+    Presentation: <Presentation size={size} />,
+    Sheet: <Sheet size={size} />,
+    Table: <Table size={size} />,
+    LayoutGrid: <LayoutGrid size={size} />,
+    GitMerge: <GitMerge size={size} />,
+    Waypoints: <Waypoints size={size} />
   }
   return <>{iconMap[icon] || <FileText size={size} />}</>
 }
@@ -391,55 +441,73 @@ export function Sidebar() {
   const draggingPathRef = useRef<string | null>(null)
   const [showNewFileMenu, setShowNewFileMenu] = useState(false)
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
-  const newFileBtnRef = useRef<HTMLButtonElement>(null)
+  const [contextNewFileSubmenuOpen, setContextNewFileSubmenuOpen] = useState(false)
+  // Both the toolbar and the empty-state show a "New File" button.
+  // Whichever the user clicks becomes the anchor for positioning +
+  // outside-click detection; the ref updates on each open. Attribute
+  // `data-new-file-anchor` marks any element that should NOT count as
+  // an outside click.
+  const newFileAnchorRef = useRef<HTMLElement | null>(null)
 
   // Load plugins on mount so we know which file types are available
   useEffect(() => {
     loadPlugins()
   }, [loadPlugins])
 
-  /** All selectable file types: built-in formats + active format-plugin extensions. */
+  /**
+   * "New File" dropdown entries. Data-driven from active format plugins —
+   * one entry per plugin (its primaryExtension, defaulting to
+   * extensions[0]). All other aliases the plugin declares stay bound in
+   * the tree / file open path; they just don't clutter the picker.
+   */
   const fileTypes = useMemo<FileTypeOption[]>(() => {
-    const result: FileTypeOption[] = [...BUILTIN_FILE_TYPES]
-    const seenExtensions = new Set(result.map((t) => t.extension))
+    const result: FileTypeOption[] = []
+    const seenExtensions = new Set<string>()
 
     for (const plugin of plugins) {
       if (plugin.type !== 'format' || plugin.status !== 'active') continue
-      if (!plugin.extensions || plugin.extensions.length === 0) continue
-      for (const ext of plugin.extensions) {
-        const lowerExt = ext.toLowerCase().replace(/^\./, '')
-        if (seenExtensions.has(lowerExt)) continue
-        seenExtensions.add(lowerExt)
-        result.push({
-          format: lowerExt,
-          label: plugin.name,
-          extension: lowerExt,
-          icon: plugin.icon
-        })
-      }
+      const extList = plugin.extensions ?? []
+      if (extList.length === 0) continue
+      const primary = (plugin.primaryExtension ?? extList[0])
+        .toLowerCase()
+        .replace(/^\./, '')
+      if (!primary || seenExtensions.has(primary)) continue
+      seenExtensions.add(primary)
+      result.push({
+        format: primary,
+        label: plugin.name,
+        extension: primary,
+        icon: plugin.fileIcon ?? plugin.icon
+      })
     }
     return result
   }, [plugins])
 
-  /** Maps file extension → plugin icon (file:// URL or lucide name) for tree node icons. */
+  /** Maps file extension → icon (file:// URL or lucide name) for tree node icons. */
   const extensionIconMap = useMemo<Map<string, string>>(() => {
     const map = new Map<string, string>()
     for (const plugin of plugins) {
-      if (plugin.type !== 'format' || !plugin.icon || !plugin.extensions) continue
+      if (plugin.type !== 'format' || !plugin.extensions) continue
+      const iconValue = plugin.fileIcon ?? plugin.icon
+      if (!iconValue) continue
       for (const ext of plugin.extensions) {
-        map.set(ext.toLowerCase().replace(/^\./, ''), plugin.icon)
+        map.set(ext.toLowerCase().replace(/^\./, ''), iconValue)
       }
     }
     return map
   }, [plugins])
 
-  // Close the New File dropdown on outside click
+  // Close the New File dropdown on outside click. Clicks inside any
+  // anchor-tagged button (there are two — toolbar + empty state) or
+  // inside the dropdown itself are treated as "inside".
   useEffect(() => {
     if (!showNewFileMenu) return
     const close = (e: globalThis.MouseEvent) => {
-      if (newFileBtnRef.current && !newFileBtnRef.current.contains(e.target as Node)) {
-        setShowNewFileMenu(false)
-      }
+      const target = e.target as HTMLElement | null
+      if (!target) return
+      if (target.closest('[data-new-file-anchor]')) return
+      if (target.closest('.new-file-dropdown')) return
+      setShowNewFileMenu(false)
     }
     window.addEventListener('click', close)
     return () => window.removeEventListener('click', close)
@@ -460,13 +528,32 @@ export function Sidebar() {
   }, [])
 
   // ---------- creation ----------
-  const handleNewFile = useCallback(() => {
-    if (newFileBtnRef.current) {
-      const rect = newFileBtnRef.current.getBoundingClientRect()
-      setDropdownPos({ top: rect.bottom + 4, left: rect.left })
+  const handleNewFile = useCallback((e: React.MouseEvent<HTMLElement>) => {
+    // Anchor the dropdown to whichever button was clicked (toolbar or
+    // empty-state). Using event.currentTarget keeps the two entry
+    // points in sync without threading refs.
+    const anchor = e.currentTarget
+    newFileAnchorRef.current = anchor
+
+    // Fallback path: if the user removed every format plugin, we don't
+    // want a blank dropdown — just create a plain `.txt` file directly.
+    // Plaintext survives without any active plugin (Editor.tsx routes
+    // unknown extensions to a raw textarea).
+    if (fileTypes.length === 0) {
+      setShowNewFileMenu(false)
+      setCreating({
+        parentPath: '',
+        isDir: false,
+        initialName: 'Untitled.txt',
+        extension: 'txt'
+      })
+      return
     }
+
+    const rect = anchor.getBoundingClientRect()
+    setDropdownPos({ top: rect.bottom + 4, left: rect.left })
     setShowNewFileMenu((prev) => !prev)
-  }, [])
+  }, [fileTypes.length])
 
   const handleNewFileWithType = useCallback(
     (fileType: FileTypeOption) => {
@@ -564,16 +651,30 @@ export function Sidebar() {
     setContextMenu({ x: e.clientX, y: e.clientY, node })
   }, [])
 
-  const handleContextNewFile = useCallback(
-    (node: NoteFile) => {
+  const handleContextNewFileWithType = useCallback(
+    (node: NoteFile, fileType: FileTypeOption) => {
       setContextMenu(null)
-      // If right-clicked on a file, create in its parent directory
-      const parentPath = node.type === 'file'
-        ? node.path.substring(0, node.path.lastIndexOf('/'))
-        : node.path
-      startCreatingInDir(parentPath, false)
+      setContextNewFileSubmenuOpen(false)
+      const parentPath =
+        node.type === 'file'
+          ? node.path.substring(0, node.path.lastIndexOf('/'))
+          : node.path
+      if (parentPath) {
+        setExpandedDirs((prev) => {
+          const next = new Set(prev)
+          next.add(parentPath)
+          return next
+        })
+      }
+      setCreating({
+        parentPath,
+        isDir: false,
+        initialName: `Untitled.${fileType.extension}`,
+        icon: fileType.icon,
+        extension: fileType.extension
+      })
     },
-    [startCreatingInDir]
+    []
   )
 
   const handleContextNewFolder = useCallback(
@@ -613,10 +714,16 @@ export function Sidebar() {
     [deleteFile]
   )
 
-  // Close the context menu on any window click.
+  // Close the context menu (and its submenu) on any window click.
   useEffect(() => {
-    if (!contextMenu) return
-    const close = () => setContextMenu(null)
+    if (!contextMenu) {
+      setContextNewFileSubmenuOpen(false)
+      return
+    }
+    const close = () => {
+      setContextMenu(null)
+      setContextNewFileSubmenuOpen(false)
+    }
     window.addEventListener('click', close)
     return () => window.removeEventListener('click', close)
   }, [contextMenu])
@@ -712,9 +819,9 @@ export function Sidebar() {
         <div className="sidebar-actions">
           <div style={{ position: 'relative' }}>
             <button
-              ref={newFileBtnRef}
               className="sidebar-action-btn tooltip"
               data-tooltip="New File"
+              data-new-file-anchor="toolbar"
               onClick={handleNewFile}
               type="button"
             >
@@ -823,6 +930,7 @@ export function Sidebar() {
               <button
                 className="btn btn-primary"
                 onClick={handleNewFile}
+                data-new-file-anchor="empty-state"
                 type="button"
                 style={{ gap: 6 }}
               >
@@ -898,59 +1006,107 @@ export function Sidebar() {
           className="context-menu"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
-          {contextMenu.node.type === 'directory' && (
-            <>
+          {/* New File — with file-type submenu when plugins are active */}
+          <div
+            className={`context-menu-item${fileTypes.length > 0 ? ' has-submenu' : ''}`}
+            onMouseEnter={() => fileTypes.length > 0 && setContextNewFileSubmenuOpen(true)}
+            onMouseLeave={() => setContextNewFileSubmenuOpen(false)}
+            onClick={() => {
+              if (fileTypes.length === 0) {
+                // No plugins — create a plain .txt directly.
+                const n = contextMenu.node
+                const parentPath =
+                  n.type === 'file'
+                    ? n.path.substring(0, n.path.lastIndexOf('/'))
+                    : n.path
+                if (parentPath) {
+                  setExpandedDirs((prev) => {
+                    const next = new Set(prev)
+                    next.add(parentPath)
+                    return next
+                  })
+                }
+                setContextMenu(null)
+                setCreating({ parentPath, isDir: false, initialName: 'Untitled.txt', extension: 'txt' })
+              }
+              // else: submenu handles the type selection
+            }}
+          >
+            <FilePlus size={14} />
+            <span>New File</span>
+            {fileTypes.length > 0 && (
+              <ChevronRight size={12} style={{ marginLeft: 'auto', opacity: 0.45 }} />
+            )}
+            {contextNewFileSubmenuOpen && fileTypes.length > 0 && (
               <div
-                className="context-menu-item"
-                onClick={() => handleContextNewFile(contextMenu.node)}
+                className="context-submenu"
+                onClick={(e) => e.stopPropagation()}
               >
-                <FilePlus size={14} /> New File
+                {fileTypes.map((ft) => (
+                  <div
+                    key={ft.extension}
+                    className="context-menu-item"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleContextNewFileWithType(contextMenu.node, ft)
+                    }}
+                  >
+                    <span className="context-submenu-icon">
+                      {ft.icon ? (
+                        <PluginIconRenderer icon={ft.icon} size={14} />
+                      ) : (
+                        <BuiltinFormatIcon format={ft.format} size={14} />
+                      )}
+                    </span>
+                    <span style={{ flex: 1 }}>{ft.label}</span>
+                    <span className="context-submenu-ext">.{ft.extension}</span>
+                  </div>
+                ))}
               </div>
-              <div
-                className="context-menu-item"
-                onClick={() => handleContextNewFolder(contextMenu.node)}
-              >
-                <FolderPlus size={14} /> New Folder
-              </div>
-              <div className="context-menu-divider" />
-            </>
-          )}
-          {contextMenu.node.type === 'file' && (
-            <>
-              <div
-                className="context-menu-item"
-                onClick={() => handleContextNewFile(contextMenu.node)}
-              >
-                <FilePlus size={14} /> New File
-              </div>
-              <div
-                className="context-menu-item"
-                onClick={() => handleContextNewFolder(contextMenu.node)}
-              >
-                <FolderPlus size={14} /> New Folder
-              </div>
-              <div className="context-menu-divider" />
-            </>
-          )}
+            )}
+          </div>
+
           <div
             className="context-menu-item"
-            onClick={() => handleContextRename(contextMenu.node)}
+            onClick={() => handleContextNewFolder(contextMenu.node)}
           >
-            <Pencil size={14} /> Rename
+            <FolderPlus size={14} /> New Folder
           </div>
+          <div className="context-menu-divider" />
+
+          {contextMenu.node.type !== 'directory' && (
+            <div
+              className="context-menu-item"
+              onClick={() => handleContextRename(contextMenu.node)}
+            >
+              <Pencil size={14} /> Rename
+            </div>
+          )}
+          {contextMenu.node.type === 'directory' && contextMenu.node.id !== '__root__' && (
+            <div
+              className="context-menu-item"
+              onClick={() => handleContextRename(contextMenu.node)}
+            >
+              <Pencil size={14} /> Rename
+            </div>
+          )}
           <div
             className="context-menu-item"
             onClick={() => handleOpenExternal(contextMenu.node)}
           >
             <ExternalLink size={14} /> Open Externally
           </div>
-          <div className="context-menu-divider" />
-          <div
-            className="context-menu-item danger"
-            onClick={() => handleContextDelete(contextMenu.node)}
-          >
-            <Trash2 size={14} /> Delete
-          </div>
+          {contextMenu.node.id !== '__root__' && (
+            <>
+              <div className="context-menu-divider" />
+              <div
+                className="context-menu-item danger"
+                onClick={() => handleContextDelete(contextMenu.node)}
+              >
+                <Trash2 size={14} /> Delete
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

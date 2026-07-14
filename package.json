@@ -12,45 +12,95 @@
     "start": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
-    "typecheck": "npm run typecheck:node && npm run typecheck:web"
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "package:mac": "electron-builder --mac",
+    "package:win": "electron-builder --win",
+    "package:linux": "electron-builder --linux"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/utils": "^3.0.0",
+    "@excalidraw/excalidraw": "^0.17.6",
     "@milkdown/core": "^7.5.0",
     "@milkdown/ctx": "^7.5.0",
     "@milkdown/kit": "^7.5.0",
+    "@milkdown/plugin-clipboard": "^7.5.0",
+    "@milkdown/plugin-cursor": "^7.5.0",
+    "@milkdown/plugin-history": "^7.5.0",
     "@milkdown/plugin-listener": "^7.5.0",
+    "@milkdown/preset-commonmark": "^7.5.0",
     "@milkdown/preset-gfm": "^7.5.0",
+    "@milkdown/prose": "^7.5.0",
     "@milkdown/react": "^7.5.0",
-    "@milkdown/theme-nord": "^7.5.0",
     "@milkdown/transformer": "^7.5.0",
-    "@tiptap/extension-image": "^3.27.4",
-    "@tiptap/extension-link": "^3.27.4",
-    "@tiptap/extension-placeholder": "^3.27.4",
-    "@tiptap/extension-task-item": "^3.27.4",
-    "@tiptap/extension-task-list": "^3.27.4",
-    "@tiptap/pm": "^3.27.4",
-    "@tiptap/react": "^3.27.4",
-    "@tiptap/starter-kit": "^3.27.4",
     "auto-launch": "^5.0.6",
+    "bpmn-js": "^17.11.1",
+    "chokidar": "^3.6.0",
+    "dmn-js": "^17.2.0",
     "lucide-react": "^0.400.0",
     "marked": "^12.0.2",
+    "mermaid": "^11.4.1",
+    "mind-elixir": "^4.5.6",
+    "plantuml-encoder": "^1.4.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "tiptap-markdown": "^0.9.0",
+    "tldraw": "^3.13.1",
     "zustand": "^4.5.4"
   },
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^1.0.1",
     "@types/auto-launch": "^5.0.5",
     "@types/node": "^20.14.10",
+    "@types/plantuml-encoder": "^1.4.2",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "electron": "^31.0.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^2.3.0",
     "typescript": "^5.5.3",
     "vite": "^5.3.4"
+  },
+  "build": {
+    "appId": "com.painote.app",
+    "productName": "PaiNote",
+    "copyright": "Copyright © 2024 PaiNote",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "src/builtin-plugins",
+        "to": "builtin-plugins"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        { "target": "dmg", "arch": ["arm64"] },
+        { "target": "zip", "arch": ["arm64"] }
+      ],
+      "darkModeSupport": true
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        { "target": "AppImage", "arch": ["x64"] },
+        { "target": "deb", "arch": ["x64"] }
+      ],
+      "category": "Utility"
+    }
   }
 }

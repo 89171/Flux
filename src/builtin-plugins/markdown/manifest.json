@@ -5,9 +5,13 @@
   "author": "PaiNote",
   "description": "Built-in Markdown editor with WYSIWYG support via Milkdown.",
   "type": "format",
-  "extensions": ["md", "markdown"],
+  "extensions": ["md", "markdown", "mdx"],
+  "primaryExtension": "md",
+  "formatBinding": "markdown",
   "main": "main.js",
   "icon": "FileText",
+  "fileIcon": "ScrollText",
   "builtin": true,
-  "minAppVersion": "1.0.0"
+  "minAppVersion": "1.0.0",
+  "sdkVersion": "1.0.0"
 }

@@ -1,4 +1,4 @@
-import { basename, extname } from 'path'
+import { basename } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import type {
   AIRequest,
@@ -90,12 +90,14 @@ export class AIService {
       apiMessages.push({ role: msg.role, content: msg.content })
     }
 
-    // Set up abort controller
+    // Set up abort controller — passed all the way down into fetch so that
+    // AIService.cancel() actually terminates the network request instead of
+    // just deleting the controller from the map.
     const abortController = new AbortController()
     this.activeRequests.set(conversationId, abortController)
 
     try {
-      const rawResponse = await this.callAI(apiMessages)
+      const rawResponse = await this.callAI(apiMessages, abortController.signal)
 
       // Parse response through adapter
       const parsedContent = adapter?.parseResponse
@@ -199,30 +201,37 @@ export class AIService {
     return this.conversations.get(conversationId)
   }
 
-  private async callAI(messages: AIMessageEntry[]): Promise<AICallResult> {
+  private async callAI(
+    messages: AIMessageEntry[],
+    signal?: AbortSignal
+  ): Promise<AICallResult> {
     if (!this.isConfigured()) {
       return { content: this.generateMockResponse(messages) }
     }
 
     if (this.provider === 'local') {
-      return this.callLocalAI(messages)
+      return this.callLocalAI(messages, signal)
     }
 
     if (this.provider === 'openai') {
-      return this.callOpenAI(messages)
+      return this.callOpenAI(messages, signal)
     }
 
     throw new Error(`Unsupported AI provider: ${this.provider}`)
   }
 
-  private async callLocalAI(messages: AIMessageEntry[]): Promise<AICallResult> {
+  private async callLocalAI(
+    messages: AIMessageEntry[],
+    signal?: AbortSignal
+  ): Promise<AICallResult> {
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: this.model,
         messages
-      })
+      }),
+      signal
     })
 
     if (!response.ok) {
@@ -238,7 +247,10 @@ export class AIService {
     }
   }
 
-  private async callOpenAI(messages: AIMessageEntry[]): Promise<AICallResult> {
+  private async callOpenAI(
+    messages: AIMessageEntry[],
+    signal?: AbortSignal
+  ): Promise<AICallResult> {
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -248,7 +260,8 @@ export class AIService {
       body: JSON.stringify({
         model: this.model,
         messages
-      })
+      }),
+      signal
     })
 
     if (!response.ok) {

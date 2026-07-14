@@ -5,7 +5,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
-import '@milkdown/theme-nord/style.css'
 import './styles/global.css'
 import './styles/components.css'
 

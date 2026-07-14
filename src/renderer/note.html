@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; font-src 'self'; frame-src 'self' https://embed.diagrams.net https://*.diagrams.net; connect-src 'self' https: http:;" />
+    <!-- Keep in sync with src/renderer/index.html — same reasoning applies. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: https:; font-src 'self' data:; frame-src 'self' file: https://embed.diagrams.net https://*.diagrams.net; connect-src 'self' https: http: blob: data:; worker-src 'self' blob:;" />
     <title>Note - PaiNote</title>
   </head>
   <body>

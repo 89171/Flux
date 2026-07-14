@@ -18,7 +18,6 @@ import { useEffect, useState, useCallback, useRef, type CSSProperties } from 're
 import { Pin, X, Minus } from 'lucide-react'
 import MilkdownEditor from './components/MilkdownEditor'
 import type { NoteFormat } from '@shared/types'
-import '@milkdown/theme-nord/style.css'
 import './styles/global.css'
 import './styles/components.css'
 
@@ -78,6 +77,10 @@ function NoteApp() {
   const [isLoading, setIsLoading] = useState(true)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const latestContentRef = useRef('')
+  const hasFlushedRef = useRef(false)
+  /** mtime observed at load time. Sent back on writes for conflict detection. */
+  const mtimeRef = useRef<number | null>(null)
+  const isDirtyRef = useRef(false)
 
   // Listen for note:loaded IPC event
   useEffect(() => {
@@ -86,9 +89,12 @@ function NoteApp() {
       setNoteData(noteInfo)
       setIsPinned(noteInfo.isPinned)
       try {
-        const fileContent = await window.painote.file.read(noteInfo.notePath)
+        const { content: fileContent, mtime } = await window.painote.file.readMeta(
+          noteInfo.notePath
+        )
         setContent(fileContent)
         latestContentRef.current = fileContent
+        mtimeRef.current = mtime
       } catch (err) {
         console.error('Failed to read note:', err)
       } finally {
@@ -98,11 +104,26 @@ function NoteApp() {
     return () => { cleanup() }
   }, [])
 
+  // Fold in writes from other windows. If we have unsaved edits we ignore
+  // the broadcast — the user's in-flight typing wins locally and a conflict
+  // will surface on the next save.
+  useEffect(() => {
+    const unsubscribe = window.painote.file.onChanged((payload) => {
+      if (!noteData || payload.path !== noteData.notePath) return
+      if (isDirtyRef.current || saveStatus !== 'saved') return
+      setContent(payload.content)
+      latestContentRef.current = payload.content
+      mtimeRef.current = payload.mtime
+    })
+    return unsubscribe
+  }, [noteData, saveStatus])
+
   // Debounced auto-save
   const handleContentChange = useCallback(
     (newContent: string) => {
       setContent(newContent)
       latestContentRef.current = newContent
+      isDirtyRef.current = true
       setSaveStatus('unsaved')
 
       if (saveTimerRef.current) {
@@ -113,8 +134,19 @@ function NoteApp() {
         if (!noteData) return
         setSaveStatus('saving')
         try {
-          await window.painote.file.write(noteData.notePath, latestContentRef.current)
-          setSaveStatus('saved')
+          const result = await window.painote.file.writeGuarded(
+            noteData.notePath,
+            latestContentRef.current,
+            mtimeRef.current
+          )
+          if (result.ok) {
+            mtimeRef.current = result.mtime
+            isDirtyRef.current = false
+            setSaveStatus('saved')
+          } else {
+            console.warn('Autosave hit a write conflict; keeping local edits.')
+            setSaveStatus('unsaved')
+          }
         } catch (err) {
           console.error('Failed to save note:', err)
           setSaveStatus('unsaved')
@@ -133,22 +165,35 @@ function NoteApp() {
     }
   }, [])
 
-  // Save before closing
+  // Save before closing. Electron cancels the close when we set returnValue,
+  // so we hijack that: cancel once, flush any pending debounced save, then
+  // re-trigger close via IPC after the write resolves. hasFlushedRef guards
+  // against reentry when window.close() bounces back through beforeunload.
   useEffect(() => {
-    const handleBeforeUnload = () => {
-      if (saveTimerRef.current && noteData) {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (hasFlushedRef.current) return
+      if (!noteData) return
+      if (saveStatus === 'saved' && !saveTimerRef.current) return
+
+      event.preventDefault()
+      event.returnValue = ''
+
+      if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current)
-        // Synchronous save attempt (best-effort)
-        try {
-          window.painote.file.write(noteData.notePath, latestContentRef.current)
-        } catch {
-          // Best-effort; ignore errors on close
-        }
+        saveTimerRef.current = null
       }
+
+      window.painote.file
+        .writeGuarded(noteData.notePath, latestContentRef.current, mtimeRef.current)
+        .catch((err) => console.error('Failed to autosave on close:', err))
+        .finally(() => {
+          hasFlushedRef.current = true
+          window.painote.window.close(noteData.noteId)
+        })
     }
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [noteData])
+  }, [noteData, saveStatus])
 
   // Pin toggle
   const handlePinToggle = useCallback(async () => {
@@ -186,8 +231,17 @@ function NoteApp() {
         if (noteData) {
           setSaveStatus('saving')
           window.painote.file
-            .write(noteData.notePath, latestContentRef.current)
-            .then(() => setSaveStatus('saved'))
+            .writeGuarded(noteData.notePath, latestContentRef.current, mtimeRef.current)
+            .then((result) => {
+              if (result.ok) {
+                mtimeRef.current = result.mtime
+                isDirtyRef.current = false
+                setSaveStatus('saved')
+              } else {
+                console.warn('Manual save hit a write conflict; keeping local edits.')
+                setSaveStatus('unsaved')
+              }
+            })
             .catch(() => setSaveStatus('unsaved'))
         }
       }

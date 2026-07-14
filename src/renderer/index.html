@@ -3,7 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; font-src 'self'; frame-src 'self' https://embed.diagrams.net https://*.diagrams.net; connect-src 'self' https: http:;" />
+    <!--
+      CSP notes:
+      - 'unsafe-eval' is required by Excalidraw (dynamic `new Function`
+        in its scene helpers) and by tldraw's runtime shape validators.
+        The blast radius in this app is small: Markdown is rendered by
+        ProseMirror as text nodes (no innerHTML), plugins run in a
+        main-process vm sandbox, and plugin iframes are `allow-scripts`
+        only. If a future feature adds untrusted HTML rendering, revisit.
+      - style-src 'unsafe-inline' is needed for Milkdown/tldraw injecting
+        style tags at mount; both are compile-time trusted.
+      - font-src includes data: because tldraw's fonts arrive as data URIs.
+      - frame-src file: is for local plugin-editor iframes.
+    -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: https:; font-src 'self' data:; frame-src 'self' file: https://embed.diagrams.net https://*.diagrams.net; connect-src 'self' https: http: blob: data:; worker-src 'self' blob:;" />
     <title>PaiNote</title>
   </head>
   <body>

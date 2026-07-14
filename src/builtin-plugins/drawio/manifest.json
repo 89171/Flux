@@ -6,8 +6,12 @@
   "description": "Built-in DrawIO diagram editor for flowcharts and diagrams.",
   "type": "format",
   "extensions": ["drawio"],
+  "primaryExtension": "drawio",
+  "formatBinding": "drawio",
   "main": "main.js",
   "icon": "GitBranch",
+  "fileIcon": "Workflow",
   "builtin": true,
-  "minAppVersion": "1.0.0"
+  "minAppVersion": "1.0.0",
+  "sdkVersion": "1.0.0"
 }

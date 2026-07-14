@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>JSON Editor Plugin</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #1a1a1a;
+        --muted: #6b7280;
+        --border: #e5e7eb;
+        --accent: #2563eb;
+        --btn-bg: #f3f4f6;
+        --btn-bg-hover: #e5e7eb;
+        --error: #dc2626;
+      }
+      :root[data-theme="dark"] {
+        --bg: #1a1a1a;
+        --fg: #e5e7eb;
+        --muted: #9ca3af;
+        --border: #374151;
+        --accent: #60a5fa;
+        --btn-bg: #2a2a2a;
+        --btn-bg-hover: #3a3a3a;
+        --error: #f87171;
+      }
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      #app {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      .toolbar {
+        flex-shrink: 0;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+        font-size: 12px;
+      }
+      .toolbar button {
+        border: 1px solid var(--border);
+        background: var(--btn-bg);
+        color: var(--fg);
+        padding: 4px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+      }
+      .toolbar button:hover {
+        background: var(--btn-bg-hover);
+      }
+      .toolbar .status {
+        margin-left: auto;
+        color: var(--muted);
+      }
+      .toolbar .status.error {
+        color: var(--error);
+      }
+      textarea {
+        flex: 1;
+        width: 100%;
+        border: none;
+        outline: none;
+        resize: none;
+        padding: 16px;
+        font-family: "SF Mono", Menlo, Consolas, monospace;
+        font-size: 13px;
+        line-height: 1.6;
+        background: var(--bg);
+        color: var(--fg);
+        box-sizing: border-box;
+        tab-size: 2;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div class="toolbar">
+        <button id="prettify" title="Reformat as pretty-printed JSON">Prettify</button>
+        <button id="minify" title="Strip whitespace">Minify</button>
+        <span class="status" id="status">–</span>
+      </div>
+      <textarea id="editor" spellcheck="false" placeholder="{}"></textarea>
+    </div>
+
+    <script type="module">
+      // Copy of the plugin-sdk browser helper. In a real plugin you'd
+      // pull painote-editor.js from the SDK; inlined here to keep the
+      // example dependency-free.
+      const PROTOCOL_VERSION = 1
+      function createPluginEditor(handlers) {
+        const parent = window.parent
+        const listener = (event) => {
+          if (event.source !== parent) return
+          const raw = event.data
+          if (!raw || raw.v !== PROTOCOL_VERSION) return
+          switch (raw.type) {
+            case 'init':
+              handlers.onInit?.(raw.payload); break
+            case 'externalUpdate':
+              handlers.onExternalUpdate?.(raw.payload); break
+            case 'themeChanged':
+              handlers.onThemeChanged?.(raw.payload); break
+            case 'saveRequested':
+              handlers.onSaveRequested?.(); break
+          }
+        }
+        window.addEventListener('message', listener)
+        const send = (type, payload) =>
+          parent.postMessage({ v: PROTOCOL_VERSION, type, payload }, '*')
+        send('ready', {})
+        return {
+          updateContent: (c) => send('contentUpdated', { content: c }),
+          requestSave: () => send('requestSave', {}),
+          log: (level, ...args) => send('log', { level, args }),
+          reportError: (err) => send('error', {
+            message: err instanceof Error ? err.message : String(err),
+            stack: err instanceof Error ? err.stack : undefined
+          }),
+          dispose: () => window.removeEventListener('message', listener)
+        }
+      }
+
+      // -------- JSON editor UI --------
+      const textarea = document.getElementById('editor')
+      const statusEl = document.getElementById('status')
+      const prettifyBtn = document.getElementById('prettify')
+      const minifyBtn = document.getElementById('minify')
+
+      // Debounce push-to-host so per-keystroke edits don't spam the
+      // parent thread. 200ms is a good sweet spot for note-taking.
+      let sendTimer = null
+      let hostRef = null
+
+      function scheduleSend(value) {
+        if (sendTimer) clearTimeout(sendTimer)
+        sendTimer = setTimeout(() => {
+          hostRef?.updateContent(value)
+          sendTimer = null
+        }, 200)
+      }
+
+      function validate(value) {
+        if (!value.trim()) {
+          statusEl.textContent = 'empty'
+          statusEl.classList.remove('error')
+          return null
+        }
+        try {
+          const parsed = JSON.parse(value)
+          statusEl.textContent = 'valid JSON'
+          statusEl.classList.remove('error')
+          return parsed
+        } catch (err) {
+          statusEl.textContent = `parse error: ${err.message}`
+          statusEl.classList.add('error')
+          return null
+        }
+      }
+
+      textarea.addEventListener('input', (e) => {
+        validate(e.target.value)
+        scheduleSend(e.target.value)
+      })
+
+      prettifyBtn.addEventListener('click', () => {
+        const parsed = validate(textarea.value)
+        if (!parsed) return
+        textarea.value = JSON.stringify(parsed, null, 2)
+        hostRef?.updateContent(textarea.value)
+      })
+
+      minifyBtn.addEventListener('click', () => {
+        const parsed = validate(textarea.value)
+        if (!parsed) return
+        textarea.value = JSON.stringify(parsed)
+        hostRef?.updateContent(textarea.value)
+      })
+
+      // Ctrl/Cmd+S — bounce to host so it can save via the normal
+      // FSM path (mtime check, broadcast, etc.).
+      window.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+          e.preventDefault()
+          hostRef?.requestSave()
+        }
+      })
+
+      hostRef = createPluginEditor({
+        onInit: ({ content, theme }) => {
+          document.documentElement.dataset.theme = theme
+          textarea.value = content ?? ''
+          validate(textarea.value)
+          textarea.focus()
+        },
+        onExternalUpdate: ({ content }) => {
+          // Preserve caret if we can — only replace when the incoming
+          // content is genuinely different, so a save-broadcast back
+          // to ourselves doesn't jump the cursor.
+          if (content === textarea.value) return
+          const wasFocused = document.activeElement === textarea
+          const caret = textarea.selectionStart
+          textarea.value = content
+          validate(textarea.value)
+          if (wasFocused) {
+            textarea.setSelectionRange(caret, caret)
+          }
+        },
+        onThemeChanged: ({ theme }) => {
+          document.documentElement.dataset.theme = theme
+        }
+      })
+    </script>
+  </body>
+</html>

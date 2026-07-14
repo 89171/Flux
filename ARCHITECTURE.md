@@ -9,8 +9,8 @@
 | 应用脚手架 | `electron-vite` + React + TypeScript | 官方推荐模板，自带 main/preload/renderer 三端热更新 |
 | UI 框架 | React 18 + TypeScript | 渲染进程 |
 | 状态管理 | Zustand | 轻量，适合多窗口共享 |
-| 编辑器内核 | CodeMirror 6 | Markdown 等文本格式编辑 |
-| Markdown 渲染 | react-markdown + remark-gfm | 开源 |
+| Markdown 编辑器 | Milkdown 7 (WYSIWYG) | 基于 ProseMirror + remark，GFM 无损往返 |
+| 纯文本编辑 | `<textarea>` | 非 markdown 格式的兜底编辑器 |
 | 思维导图 | markmap | 开源，Markdown 驱动 |
 | Drawio | drawio iframe embed | 开源，免打包 |
 | AI | OpenAI 兼容 API（可配置 baseURL/key） | 兼容主流模型 |

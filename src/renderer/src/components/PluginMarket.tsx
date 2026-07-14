@@ -7,10 +7,8 @@
 
 import { useCallback, useState, useEffect, type ReactNode } from 'react'
 import {
-  Plus,
   Trash2,
-  Power,
-  PowerOff,
+  Download,
   BookOpen,
   Package,
   FolderOpen,
@@ -21,7 +19,12 @@ import {
   FileText,
   Network,
   GitBranch,
-  FileCode
+  FileCode,
+  LayoutGrid,
+  GitMerge,
+  Waypoints,
+  Workflow,
+  Table
 } from 'lucide-react'
 import { usePluginStore } from '../stores/pluginStore'
 import type { PluginInfo, PluginStatus } from '@shared/types'
@@ -38,6 +41,7 @@ function statusLabel(status: PluginStatus): string {
     case 'active':
       return 'Active'
     case 'installed':
+      return 'Available'
     case 'inactive':
       return 'Inactive'
     case 'error':
@@ -63,13 +67,6 @@ function statusClass(status: PluginStatus): string {
     default:
       return 'status-inactive'
   }
-}
-
-/**
- * Returns a fallback icon letter from the plugin name.
- */
-function pluginIconLetter(name: string): string {
-  return name ? name.charAt(0).toUpperCase() : '?'
 }
 
 /**
@@ -109,7 +106,12 @@ function renderPluginIcon(icon: string | undefined, size: number = 22): ReactNod
     Network: <Network size={size} />,
     GitBranch: <GitBranch size={size} />,
     FileCode: <FileCode size={size} />,
-    Package: <Package size={size} />
+    Package: <Package size={size} />,
+    LayoutGrid: <LayoutGrid size={size} />,
+    GitMerge: <GitMerge size={size} />,
+    Waypoints: <Waypoints size={size} />,
+    Workflow: <Workflow size={size} />,
+    Table: <Table size={size} />
   }
   return iconMap[icon] || <Package size={size} />
 }
@@ -119,38 +121,58 @@ function renderPluginIcon(icon: string | undefined, size: number = 22): ReactNod
  */
 function PluginCard({
   plugin,
-  onActivate,
-  onDeactivate,
+  onSetEnabled,
   onUninstall
 }: {
   plugin: PluginInfo
-  onActivate: (id: string) => void
-  onDeactivate: (id: string) => void
+  onSetEnabled: (id: string, enabled: boolean) => void
   onUninstall: (id: string) => void
 }): JSX.Element {
-  const [confirmUninstall, setConfirmUninstall] = useState(false)
+  const [confirmRemove, setConfirmRemove] = useState(false)
   const isActive = plugin.status === 'active'
   const isError = plugin.status === 'error'
-  const isInstalling = plugin.status === 'installing'
+  // Treat transitional states as present so the button stays "Remove"
+  // and disabled until the transition completes.
+  const isPresent =
+    isActive ||
+    isError ||
+    plugin.status === 'activating' ||
+    plugin.status === 'deactivating'
+  const isInstalling =
+    plugin.status === 'installing' ||
+    plugin.status === 'activating' ||
+    plugin.status === 'deactivating'
 
-  const handleUninstall = useCallback(() => {
-    if (confirmUninstall) {
-      onUninstall(plugin.id)
-      setConfirmUninstall(false)
+  /**
+   * Single action button that switches between Install / Remove based
+   * on the current state. Semantics:
+   *   - built-in + present  → Remove disables (safe, files stay on disk)
+   *   - built-in + removed  → Install re-enables
+   *   - user plugin + present → Remove uninstalls (deletes plugin dir)
+   *   - user plugin + removed → shouldn't render; row disappears when
+   *                             uninstall drops the entry from the list
+   *
+   * Third-party remove asks for double-click confirmation because it's
+   * destructive; built-in remove is one-click because it's reversible.
+   */
+  const handlePrimaryAction = useCallback(() => {
+    if (isPresent) {
+      if (plugin.isBuiltin) {
+        onSetEnabled(plugin.id, false)
+        return
+      }
+      // Destructive: two-click confirm for third-party uninstall.
+      if (confirmRemove) {
+        onUninstall(plugin.id)
+        setConfirmRemove(false)
+      } else {
+        setConfirmRemove(true)
+        setTimeout(() => setConfirmRemove(false), 3000)
+      }
     } else {
-      setConfirmUninstall(true)
-      // Auto-cancel confirmation after 3 seconds
-      setTimeout(() => setConfirmUninstall(false), 3000)
+      onSetEnabled(plugin.id, true)
     }
-  }, [confirmUninstall, onUninstall, plugin.id])
-
-  const handleToggle = useCallback(() => {
-    if (isActive) {
-      onDeactivate(plugin.id)
-    } else {
-      onActivate(plugin.id)
-    }
-  }, [isActive, onActivate, onDeactivate, plugin.id])
+  }, [confirmRemove, isPresent, onSetEnabled, onUninstall, plugin.id, plugin.isBuiltin])
 
   return (
     <div className={`plugin-card ${isError ? 'plugin-card-error' : ''}`}>
@@ -200,6 +222,22 @@ function PluginCard({
             >
               v{plugin.version}
             </span>
+            {plugin.isBuiltin && (
+              <span
+                title="Bundled with the app — removing only disables it, files stay on disk."
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  padding: '1px 6px',
+                  borderRadius: '3px',
+                  background: 'var(--accent-primary-dim, rgba(37, 99, 235, 0.12))',
+                  color: 'var(--accent-primary)',
+                  lineHeight: 1.4
+                }}
+              >
+                Built-in
+              </span>
+            )}
             <span
               className={`plugin-status-badge ${statusClass(plugin.status)}`}
               style={{
@@ -294,58 +332,62 @@ function PluginCard({
         </div>
       )}
 
-      {/* Action buttons */}
+      {/* Action button — single Install/Remove switch. Third-party
+          removals ask for a second click to confirm because they delete
+          the plugin dir off disk. Built-in removals are one-click since
+          they're reversible via Install. */}
       <div style={{ display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '10px', borderTop: '1px solid var(--border-secondary)' }}>
         <button
-          onClick={handleToggle}
-          disabled={isInstalling || plugin.isBuiltin}
-          title={isActive ? 'Disable plugin' : 'Enable plugin'}
+          onClick={handlePrimaryAction}
+          disabled={isInstalling}
+          title={
+            isPresent
+              ? plugin.isBuiltin
+                ? 'Remove from app (files stay bundled, re-installable)'
+                : confirmRemove
+                  ? 'Click again to confirm — this deletes the plugin dir'
+                  : 'Remove plugin'
+              : 'Install plugin'
+          }
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '5px',
             padding: '5px 12px',
             borderRadius: '6px',
-            border: '1px solid var(--border-secondary)',
-            background: isActive ? 'var(--accent-primary)' : 'transparent',
-            color: isActive ? '#fff' : 'var(--text-secondary)',
-            cursor: isInstalling || plugin.isBuiltin ? 'not-allowed' : 'pointer',
+            border: '1px solid',
+            borderColor:
+              isPresent && !plugin.isBuiltin && confirmRemove
+                ? 'var(--color-error, #ef4444)'
+                : isPresent
+                  ? 'var(--border-secondary)'
+                  : 'var(--accent-primary)',
+            background:
+              isPresent && !plugin.isBuiltin && confirmRemove
+                ? 'var(--color-error, #ef4444)'
+                : isPresent
+                  ? 'transparent'
+                  : 'var(--accent-primary)',
+            color:
+              isPresent && !plugin.isBuiltin && confirmRemove
+                ? '#fff'
+                : isPresent
+                  ? 'var(--text-secondary)'
+                  : '#fff',
+            cursor: isInstalling ? 'not-allowed' : 'pointer',
             fontSize: '12px',
             fontWeight: 500,
-            opacity: isInstalling || plugin.isBuiltin ? 0.5 : 1,
+            opacity: isInstalling ? 0.5 : 1,
             transition: 'all 0.15s ease'
           }}
         >
-          {isActive ? <PowerOff size={13} /> : <Power size={13} />}
-          {isActive ? 'Disable' : 'Enable'}
+          {isPresent ? <Trash2 size={13} /> : <Download size={13} />}
+          {isPresent
+            ? confirmRemove && !plugin.isBuiltin
+              ? 'Confirm'
+              : 'Remove'
+            : 'Install'}
         </button>
-
-        {!plugin.isBuiltin && (
-          <button
-            onClick={handleUninstall}
-            disabled={isInstalling}
-            title={confirmUninstall ? 'Click again to confirm uninstall' : 'Uninstall plugin'}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '5px',
-              padding: '5px 12px',
-              borderRadius: '6px',
-              border: '1px solid',
-              borderColor: confirmUninstall ? 'var(--color-error, #ef4444)' : 'var(--border-secondary)',
-              background: confirmUninstall ? 'var(--color-error, #ef4444)' : 'transparent',
-              color: confirmUninstall ? '#fff' : 'var(--text-secondary)',
-              cursor: isInstalling ? 'not-allowed' : 'pointer',
-              fontSize: '12px',
-              fontWeight: 500,
-              opacity: isInstalling ? 0.5 : 1,
-              transition: 'all 0.15s ease'
-            }}
-          >
-            <Trash2 size={13} />
-            {confirmUninstall ? 'Confirm' : 'Uninstall'}
-          </button>
-        )}
       </div>
     </div>
   )
@@ -361,60 +403,37 @@ export default function PluginMarket({ onBack }: PluginMarketProps): JSX.Element
     isInstalling,
     installMessage,
     loadPlugins,
-    activatePlugin,
-    deactivatePlugin,
+    setPluginEnabled,
     installPlugin,
-    loadLocalPlugin,
     uninstallPlugin,
     openDevGuide
   } = usePluginStore()
-
-  const [installPath, setInstallPath] = useState('')
 
   // Load plugins on mount
   useEffect(() => {
     loadPlugins()
   }, [loadPlugins])
 
-  // Handle install from directory path
-  const handleLoadPath = useCallback(async () => {
-    const trimmed = installPath.trim()
-    if (!trimmed) return
-    const result = await loadLocalPlugin(trimmed)
-    if (result.success) {
-      setInstallPath('')
-    }
-  }, [installPath, loadLocalPlugin])
-
-  // Handle install from file dialog
-  const handleInstallFromDialog = useCallback(async () => {
+  // Open directory picker to install a local plugin
+  const handleLoadLocal = useCallback(async () => {
     const result = await installPlugin()
     if (result.success) {
       await loadPlugins()
     }
   }, [installPlugin, loadPlugins])
 
-  // Handle load local from file dialog
-  const handleLoadLocalDialog = useCallback(async () => {
-    const result = await loadLocalPlugin('')
-    if (result.success) {
+  // Persist the user's enable/disable choice (survives restart) and
+  // reconcile runtime state. Handles both first-time enables of opt-in
+  // builtins and toggling default-active plugins off.
+  const handleSetEnabled = useCallback(
+    async (id: string, enabled: boolean) => {
+      await setPluginEnabled(id, enabled)
+      // Explicitly refresh the list so the card's button state (Install /
+      // Remove) updates even if the store's internal refresh races with the
+      // re-render.
       await loadPlugins()
-    }
-  }, [loadLocalPlugin, loadPlugins])
-
-  // Handle plugin activate/deactivate
-  const handleActivate = useCallback(
-    async (id: string) => {
-      await activatePlugin(id)
     },
-    [activatePlugin]
-  )
-
-  const handleDeactivate = useCallback(
-    async (id: string) => {
-      await deactivatePlugin(id)
-    },
-    [deactivatePlugin]
+    [setPluginEnabled, loadPlugins]
   )
 
   // Handle plugin uninstall
@@ -479,7 +498,7 @@ export default function PluginMarket({ onBack }: PluginMarketProps): JSX.Element
         {/* Right: Action buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button
-            onClick={handleInstallFromDialog}
+            onClick={handleLoadLocal}
             disabled={isInstalling}
             style={{
               display: 'flex',
@@ -494,26 +513,6 @@ export default function PluginMarket({ onBack }: PluginMarketProps): JSX.Element
               fontSize: '13px',
               fontWeight: 600,
               opacity: isInstalling ? 0.7 : 1
-            }}
-          >
-            <Plus size={15} />
-            Install Plugin
-          </button>
-          <button
-            onClick={handleLoadLocalDialog}
-            disabled={isInstalling}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '7px 14px',
-              borderRadius: '6px',
-              border: '1px solid var(--border-secondary)',
-              background: 'transparent',
-              color: 'var(--text-secondary)',
-              cursor: isInstalling ? 'wait' : 'pointer',
-              fontSize: '13px',
-              fontWeight: 500
             }}
           >
             <FolderOpen size={15} />
@@ -539,65 +538,6 @@ export default function PluginMarket({ onBack }: PluginMarketProps): JSX.Element
             Plugin Development Guide
           </button>
         </div>
-      </div>
-
-      {/* Install bar */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          padding: '10px 20px',
-          borderBottom: '1px solid var(--border-secondary)',
-          flexShrink: 0
-        }}
-      >
-        <input
-          type="text"
-          value={installPath}
-          onChange={(e) => setInstallPath(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleLoadPath()
-          }}
-          placeholder="Paste plugin directory path..."
-          style={{
-            flex: 1,
-            padding: '7px 12px',
-            borderRadius: '6px',
-            border: '1px solid var(--border-secondary)',
-            background: 'var(--bg-primary)',
-            color: 'var(--text-primary)',
-            fontSize: '13px',
-            outline: 'none'
-          }}
-        />
-        <button
-          onClick={handleLoadPath}
-          disabled={isInstalling || !installPath.trim()}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '5px',
-            padding: '7px 16px',
-            borderRadius: '6px',
-            border: '1px solid var(--accent-primary)',
-            background: 'transparent',
-            color: 'var(--accent-primary)',
-            cursor: isInstalling || !installPath.trim() ? 'not-allowed' : 'pointer',
-            fontSize: '13px',
-            fontWeight: 600,
-            opacity: isInstalling || !installPath.trim() ? 0.5 : 1
-          }}
-        >
-          {isInstalling ? (
-            <>
-              <RefreshCw size={14} className="spin-icon" />
-              Loading...
-            </>
-          ) : (
-            'Load'
-          )}
-        </button>
       </div>
 
       {/* Install message banner */}
@@ -667,7 +607,7 @@ export default function PluginMarket({ onBack }: PluginMarketProps): JSX.Element
             <Package size={48} strokeWidth={1} />
             <p style={{ fontSize: '15px', fontWeight: 500, margin: 0 }}>No plugins installed</p>
             <p style={{ fontSize: '13px', margin: 0, opacity: 0.7 }}>
-              Click "Install Plugin" to browse or "Load Local" to load from a directory.
+              Click "Load Local" to select a plugin directory.
             </p>
           </div>
         ) : (
@@ -676,8 +616,7 @@ export default function PluginMarket({ onBack }: PluginMarketProps): JSX.Element
               <PluginCard
                 key={plugin.id}
                 plugin={plugin}
-                onActivate={handleActivate}
-                onDeactivate={handleDeactivate}
+                onSetEnabled={handleSetEnabled}
                 onUninstall={handleUninstall}
               />
             ))}

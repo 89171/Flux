@@ -1,0 +1,116 @@
+name: Build & Release
+
+# 触发条件：
+#   1. push 到 main 分支 → 构建并更新 "latest" 预发布
+#   2. 推送 v*.*.* 格式的 tag → 构建并发布正式 Release
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+
+# 允许 workflow 创建 / 更新 Release
+permissions:
+  contents: write
+
+jobs:
+  # ─────────────────────────────────────────────
+  # 构建阶段：三个平台并行
+  # ─────────────────────────────────────────────
+  build:
+    name: Build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: mac
+            os: macos-latest
+            args: --mac --arm64
+          - platform: win
+            os: windows-latest
+            args: --win --x64
+          - platform: linux
+            os: ubuntu-latest
+            args: --linux --x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (electron-vite)
+        run: npm run build
+
+      # macOS：跳过代码签名（无证书时设置 CSC_IDENTITY_AUTO_DISCOVERY=false）
+      # 如有 Apple 开发者证书，移除该环境变量并在 Secrets 中配置
+      # CSC_LINK / CSC_KEY_PASSWORD
+      - name: Package (electron-builder)
+        run: npx electron-builder ${{ matrix.args }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.platform }}
+          # 收集各平台产物；electron-builder 输出到 dist/
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+          if-no-files-found: warn
+
+  # ─────────────────────────────────────────────
+  # 发布阶段：等所有平台构建完再跑
+  # ─────────────────────────────────────────────
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh release-artifacts/
+
+      # ── 情况 A：tag 推送 → 正式版本 Release ──
+      - name: Publish versioned release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/**/*
+          generate_release_notes: true
+
+      # ── 情况 B：main 分支推送 → 滚动预发布（latest）──
+      # 每次推送到 main 都会更新同一个 "latest" Release，
+      # 旧产物被替换，始终保留最新构建。
+      - name: Update rolling pre-release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: 'Latest Build'
+          prerelease: true
+          files: release-artifacts/**/*
+          body: |
+            ⚠️ 这是从 `main` 分支自动构建的预发布版本，可能不稳定。
+
+            如需稳定版本，请使用带版本号的 [正式 Release](../../releases)。
+
+            **构建提交：** ${{ github.sha }}

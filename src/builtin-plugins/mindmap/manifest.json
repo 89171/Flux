@@ -3,11 +3,15 @@
   "name": "Mindmap",
   "version": "1.0.0",
   "author": "PaiNote",
-  "description": "Built-in mindmap editor for visual thinking and brainstorming.",
+  "description": "Built-in mindmap editor for visual thinking and brainstorming, powered by Mind-Elixir.",
   "type": "format",
-  "extensions": ["mm"],
+  "extensions": ["mm", "mindmap"],
+  "primaryExtension": "mm",
+  "formatBinding": "mindmap",
   "main": "main.js",
   "icon": "Network",
+  "fileIcon": "Network",
   "builtin": true,
-  "minAppVersion": "1.0.0"
+  "minAppVersion": "1.0.0",
+  "sdkVersion": "1.0.0"
 }

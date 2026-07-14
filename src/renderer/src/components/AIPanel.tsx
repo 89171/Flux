@@ -9,7 +9,7 @@
  * - Voice input (delegates to attachment flow)
  */
 
-import { useState, useRef, useEffect, useCallback, type CSSProperties } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Send,
   Paperclip,
