@@ -35,9 +35,22 @@ export interface FormatPlugin {
 }
 
 export interface AIFormatAdapter {
+  /** System prompt that instructs the AI how to generate content for this format */
   systemPrompt: string
+  /** Post-process the AI's raw response (e.g. strip markdown fences, validate XML) */
   parseResponse: (response: string) => string
+  /** Format the current document content before sending to AI as context */
   formatContext?: (content: string) => string
+  /**
+   * Suggested prompts shown in the AI panel when this format is active.
+   * Helps users discover what AI can do for this format.
+   */
+  suggestedPrompts?: string[]
+  /**
+   * Validate AI-generated content before applying to the document.
+   * Returns an error message string if invalid, or null if valid.
+   */
+  validateResponse?: (response: string) => string | null
 }
 
 export interface PluginContext {

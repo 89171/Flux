@@ -40,13 +40,34 @@ export const IPC = {
   AI_TRANSCRIBE: 'ai:transcribe',
   AI_CANCEL: 'ai:cancel',
   AI_SETTINGS: 'ai:settings',
+  /** Test an unsaved AI config with a minimal round-trip. Payload: Partial<AppSettings['ai']>. Returns { success: boolean; error?: string }. */
+  AI_TEST_CONFIG: 'ai:testConfig',
+  // Streaming: renderer sends AI_GENERATE_STREAM with an AIRequest;
+  // main process emits AI_STREAM_CHUNK (string) for each text chunk,
+  // then AI_STREAM_DONE ({ conversationId }) or AI_STREAM_ERROR (string).
+  AI_GENERATE_STREAM: 'ai:generateStream',
+  AI_STREAM_CHUNK: 'ai:streamChunk',
+  AI_STREAM_DONE: 'ai:streamDone',
+  AI_STREAM_ERROR: 'ai:streamError',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
   DIALOG_OPEN_FILE: 'dialog:openFile',
   DIALOG_OPEN_DIRECTORY: 'dialog:openDirectory',
   DIALOG_SAVE_FILE: 'dialog:saveFile',
   APP_GET_VERSION: 'app:getVersion',
-  APP_GET_PATHS: 'app:getPaths'
+  APP_GET_PATHS: 'app:getPaths',
+  /** Open an external https URL in the user's default browser. Payload: url string. */
+  APP_OPEN_URL: 'app:openUrl',
+  /** Check for app updates via GitHub Releases API. Returns UpdateCheckResult. */
+  APP_CHECK_FOR_UPDATES: 'app:checkForUpdates',
+  /** Search file contents across the workspace. Returns SearchResult[]. */
+  FILE_SEARCH: 'file:search',
+  /** Broadcast event: a menu item was triggered. Payload: { action: string }. */
+  MENU_ACTION_EVENT: 'menu:action',
+  /** Export content to PDF. Payload: { content: string, fileName: string }. Returns save path or null. */
+  FILE_EXPORT_PDF: 'file:exportPdf',
+  /** Export content to HTML. Payload: { content: string, fileName: string }. Returns save path or null. */
+  FILE_EXPORT_HTML: 'file:exportHtml'
 } as const
 
 export type IPCChannel = (typeof IPC)[keyof typeof IPC]

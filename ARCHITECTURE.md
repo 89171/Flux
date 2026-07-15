@@ -1,4 +1,4 @@
-# PaiNote 架构设计
+# Flux 架构设计
 
 > 一款插件化、支持桌面置顶与 AI 生成的 Electron 笔记本应用。
 
@@ -49,7 +49,7 @@
 ## 三、目录结构
 
 ```
-PaiNote/
+Flux/
 ├── package.json
 ├── electron.vite.config.ts
 ├── tsconfig.json / tsconfig.node.json / tsconfig.web.json
@@ -81,7 +81,7 @@ PaiNote/
 │   ├── preload/                      # 安全桥接层
 │   │   └── src/
 │   │       ├── index.ts
-│   │       └── api.ts                # window.painote API 定义
+│   │       └── api.ts                # window.flux API 定义
 │   │
 │   ├── renderer/                     # React UI
 │   │   └── src/
@@ -97,7 +97,7 @@ PaiNote/
 │   │       └── plugin-host/
 │   │           └── registry.tsx      # 渲染端组件注册表
 │   │
-│   ├── plugin-sdk/                   # 插件 SDK（独立包 @painote/plugin-sdk）
+│   ├── plugin-sdk/                   # 插件 SDK（独立包 @flux/plugin-sdk）
 │   │   └── src/
 │   │       ├── types.ts              # 核心接口定义
 │   │       ├── context.ts            # PluginContext API
@@ -112,9 +112,9 @@ PaiNote/
 │
 ├── plugins/                          # 内置插件源码
 │   └── markdown/
-│       ├── package.json              # 含 painote 字段的 manifest
+│       ├── package.json              # 含 flux 字段的 manifest
 │       └── src/
-│           ├── index.ts              # 导出 PaiNotePlugin
+│           ├── index.ts              # 导出 FluxPlugin
 │           ├── Editor.tsx
 │           ├── Viewer.tsx
 │           ├── serialize.ts
@@ -130,10 +130,10 @@ PaiNote/
 
 ```json
 {
-  "name": "@painote/plugin-markdown",
+  "name": "@flux/plugin-markdown",
   "version": "1.0.0",
   "main": "dist/index.js",
-  "painote": {
+  "flux": {
     "format": "markdown",
     "displayName": "Markdown",
     "icon": "icon.png",
@@ -147,7 +147,7 @@ PaiNote/
 
 ```typescript
 // packages/plugin-sdk/src/types.ts
-export interface PaiNotePlugin {
+export interface FluxPlugin {
   manifest: PluginManifest;
   editor: React.ComponentType<EditorProps>;      // 编辑器组件
   viewer?: React.ComponentType<ViewerProps>;     // 只读视图
@@ -210,13 +210,13 @@ interface PluginContext {
 - 通用机制：每个插件 = 一个符合 manifest 的 npm 包或 zip
 - 安装：从 registry 下载 → 校验签名/manifest → 解压到 `dev-plugins/` → load
 - 卸载：deactivate → 删除目录
-- 第三方上传：提供 manifest 规范 + 打包脚本 `painote package`，上传到 registry（初期可用 GitHub Release 作为分发源）
+- 第三方上传：提供 manifest 规范 + 打包脚本 `flux package`，上传到 registry（初期可用 GitHub Release 作为分发源）
 - 本地安装：支持从本地路径/zip 安装，便于开发调试
 
 ## 八、推进步骤（每步确认后再继续）
 
 1. ✅ 架构与目录结构（本文档）
-2. ✅ 插件系统骨架 + SDK（@painote/plugin-sdk，含 definePlugin 封装语法 / 生命周期 / 权限 / AI 适配器）
+2. ✅ 插件系统骨架 + SDK（@flux/plugin-sdk，含 definePlugin 封装语法 / 生命周期 / 权限 / AI 适配器）
 3. ✅ Markdown 内置插件（CodeMirror 6 编辑 + react-markdown 实时预览 + GFM + AI 适配器）
 4. ✅ 窗口置顶功能（always-on-top + macOS 跨 Space + 透明度 + 贴边收起 + 开机自启 + 多窗口 + 右下角悬浮控件）
 5. ✅ AI 生成模块（OpenAI 兼容 API + 多轮对话 + 图片多模态 + 插件 AI 适配器格式适配 + 配置持久化）

@@ -1,7 +1,7 @@
 import { ipcMain, dialog, shell, app, BrowserWindow } from 'electron'
+import { writeFileSync } from 'fs'
 import { join } from 'path'
 import { IPC } from '@shared/ipc-channels'
-import { APP_VERSION } from '@shared/constants'
 import type { WindowManager } from '../WindowManager'
 import type { PluginManager } from '../PluginManager'
 import type { PluginInstaller } from '../PluginInstaller'
@@ -12,7 +12,9 @@ import type {
   AIRequest,
   AppSettings,
   FileChangedEvent,
-  NoteFormat
+  NoteFormat,
+  SearchResult,
+  UpdateCheckResult
 } from '@shared/types'
 
 function broadcastFileChanged(
@@ -122,6 +124,90 @@ export function registerIPC(
     const fullPath = fsManager.resolvePath(relativePath)
     await shell.openPath(fullPath)
     return true
+  })
+
+  ipcMain.handle(
+    IPC.FILE_SEARCH,
+    async (_event, query: string, maxResults?: number): Promise<SearchResult[]> => {
+      return fsManager.searchFiles(query, maxResults)
+    }
+  )
+
+  ipcMain.handle(IPC.FILE_EXPORT_HTML, async (_event, content: string, fileName: string) => {
+    const result = await dialog.showSaveDialog({
+      title: 'Export as HTML',
+      defaultPath: fileName.replace(/\.[^.]+$/, '') + '.html',
+      filters: [{ name: 'HTML', extensions: ['html'] }]
+    })
+    if (result.canceled || !result.filePath) return null
+
+    // Use marked to convert markdown to HTML, wrap in a full HTML document
+    const { marked } = await import('marked')
+    const htmlBody = marked.parse(content, { async: false }) as string
+    const fullHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${fileName}</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #333; line-height: 1.7; }
+  pre { background: #f5f5f5; padding: 16px; border-radius: 8px; overflow-x: auto; }
+  code { background: #f5f5f5; padding: 2px 6px; border-radius: 4px; font-family: 'SF Mono', monospace; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #ddd; padding: 8px 12px; }
+  img { max-width: 100%; }
+  blockquote { border-left: 4px solid #ddd; margin: 0; padding-left: 16px; color: #666; }
+</style>
+</head>
+<body>
+${htmlBody}
+</body>
+</html>`
+    writeFileSync(result.filePath, fullHtml, 'utf-8')
+    return result.filePath
+  })
+
+  ipcMain.handle(IPC.FILE_EXPORT_PDF, async (_event, content: string, fileName: string) => {
+    const result = await dialog.showSaveDialog({
+      title: 'Export as PDF',
+      defaultPath: fileName.replace(/\.[^.]+$/, '') + '.pdf',
+      filters: [{ name: 'PDF', extensions: ['pdf'] }]
+    })
+    if (result.canceled || !result.filePath) return null
+
+    // Create a hidden BrowserWindow, load the HTML, print to PDF
+    const win = new BrowserWindow({
+      width: 800,
+      height: 600,
+      show: false,
+      webPreferences: { sandbox: true }
+    })
+
+    const { marked } = await import('marked')
+    const htmlBody = marked.parse(content, { async: false }) as string
+    const fullHtml = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 800px; margin: 0; padding: 20px; color: #333; line-height: 1.7; }
+  pre { background: #f5f5f5; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 12px; }
+  code { background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-family: monospace; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #ddd; padding: 6px 10px; }
+  img { max-width: 100%; }
+  blockquote { border-left: 3px solid #ddd; margin: 0; padding-left: 12px; color: #666; }
+</style></head><body>${htmlBody}</body></html>`
+
+    await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(fullHtml))
+    const pdfBuffer = await win.webContents.printToPDF({
+      pageSize: 'A4',
+      printBackground: true,
+      margins: { top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 }
+    })
+    writeFileSync(result.filePath, pdfBuffer)
+    win.close()
+    return result.filePath
   })
 
   // ============ Window IPC ============
@@ -322,15 +408,30 @@ export function registerIPC(
   // ============ AI IPC ============
 
   ipcMain.handle(IPC.AI_GENERATE, async (_event, request: AIRequest) => {
-    return aiService.generate(request)
+    try {
+      const data = await aiService.generate(request)
+      return { success: true, data }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   ipcMain.handle(IPC.AI_CHAT, async (_event, request: AIRequest) => {
-    return aiService.chat(request)
+    try {
+      const data = await aiService.chat(request)
+      return { success: true, data }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   ipcMain.handle(IPC.AI_TRANSCRIBE, async (_event, audioPath: string) => {
-    return aiService.transcribe(audioPath)
+    try {
+      const data = await aiService.transcribe(audioPath)
+      return { success: true, data }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   ipcMain.handle(IPC.AI_CANCEL, async (_event, conversationId: string) => {
@@ -345,6 +446,48 @@ export function registerIPC(
       return updated.ai
     }
     return getSettings().ai
+  })
+
+  // Probe an unsaved AI config with a minimal round-trip. The Settings
+  // panel calls this before persisting, so a wrong API key / base URL /
+  // model name is surfaced as an inline error instead of silently
+  // saving a broken configuration. AIService.testConfig swaps the
+  // candidate config in temporarily and restores the live one on
+  // return, so a failed probe never disrupts in-flight AI calls.
+  ipcMain.handle(
+    IPC.AI_TEST_CONFIG,
+    async (_event, config: Partial<AppSettings['ai']>) => {
+      return aiService.testConfig(config)
+    }
+  )
+
+  // ─── Streaming generation ───
+  // Unlike the one-shot AI_GENERATE (handle → return), streaming uses
+  // ipcMain.on + webContents.send: the main process iterates the
+  // AsyncGenerator from aiService.generateStream() and pushes each
+  // chunk to the renderer via AI_STREAM_CHUNK. When done (or on error)
+  // it emits AI_STREAM_DONE / AI_STREAM_ERROR so the renderer can
+  // finalize the message and clean up listeners.
+  //
+  // The conversationId is generated upfront and injected into the
+  // request so generateStream reuses it (it does
+  // `request.conversationId || this.generateConversationId()`). This
+  // way we can send the same id back in AI_STREAM_DONE.
+  ipcMain.on(IPC.AI_GENERATE_STREAM, async (event, request: AIRequest) => {
+    const sender = event.sender
+    const conversationId = request.conversationId || aiService.generateConversationId()
+    const requestWithId: AIRequest = { ...request, conversationId }
+    try {
+      for await (const chunk of aiService.generateStream(requestWithId)) {
+        sender.send(IPC.AI_STREAM_CHUNK, chunk)
+      }
+      sender.send(IPC.AI_STREAM_DONE, { conversationId })
+    } catch (err) {
+      sender.send(
+        IPC.AI_STREAM_ERROR,
+        err instanceof Error ? err.message : String(err)
+      )
+    }
   })
 
   // ============ Settings IPC ============
@@ -414,7 +557,7 @@ export function registerIPC(
   // ============ App IPC ============
 
   ipcMain.handle(IPC.APP_GET_VERSION, async () => {
-    return APP_VERSION
+    return app.getVersion()
   })
 
   ipcMain.handle(IPC.APP_GET_PATHS, async () => {
@@ -426,6 +569,75 @@ export function registerIPC(
       workspace: fsManager.getWorkspacePath(),
       builtinPlugins: pluginManager.getBuiltinPluginsPath(),
       userPlugins: pluginManager.getUserPluginsPath()
+    }
+  })
+
+  // Open an external URL in the user's default browser. Restricted to
+  // http(s) to prevent file:// / shell-injection abuse from the renderer.
+  ipcMain.handle(IPC.APP_OPEN_URL, async (_event, url: string) => {
+    try {
+      const parsed = new URL(url)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return false
+      }
+      await shell.openExternal(url)
+      return true
+    } catch (err) {
+      console.error('openExternal failed:', err)
+      return false
+    }
+  })
+
+  // Check for updates by comparing the current app version with the
+  // latest GitHub Release tag. Uses the unauthenticated GitHub API
+  // (60 requests/hour — sufficient for manual update checks).
+  ipcMain.handle(IPC.APP_CHECK_FOR_UPDATES, async (): Promise<UpdateCheckResult> => {
+    const currentVersion = app.getVersion()
+    try {
+      const response = await fetch(
+        'https://api.github.com/repos/jianmin-zhu/Flux/releases/latest',
+        { headers: { 'User-Agent': 'Flux-App-Updater' } }
+      )
+      if (!response.ok) {
+        throw new Error(`GitHub API returned ${response.status}`)
+      }
+      const data = (await response.json()) as {
+        tag_name: string
+        html_url: string
+        body: string
+      }
+      // Strip leading 'v' from tag name (e.g. "v1.0.1" → "1.0.1")
+      const latestVersion = (data.tag_name || '').replace(/^v/, '')
+
+      // Simple semver comparison: split by '.', compare each segment numerically
+      const hasUpdate = (() => {
+        const a = currentVersion.split('.').map(Number)
+        const b = latestVersion.split('.').map(Number)
+        for (let i = 0; i < Math.max(a.length, b.length); i++) {
+          const va = a[i] || 0
+          const vb = b[i] || 0
+          if (vb > va) return true
+          if (vb < va) return false
+        }
+        return false
+      })()
+
+      return {
+        hasUpdate,
+        currentVersion,
+        latestVersion,
+        releaseUrl: data.html_url || '',
+        releaseNotes: data.body || ''
+      }
+    } catch (err) {
+      console.error('Update check failed:', err)
+      return {
+        hasUpdate: false,
+        currentVersion,
+        latestVersion: '',
+        releaseUrl: '',
+        releaseNotes: ''
+      }
     }
   })
 

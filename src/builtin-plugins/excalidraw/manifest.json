@@ -2,7 +2,7 @@
   "id": "excalidraw",
   "name": "Excalidraw",
   "version": "1.0.0",
-  "author": "PaiNote",
+  "author": "Flux",
   "description": "Built-in Excalidraw canvas for hand-drawn-style sketches and diagrams.",
   "type": "format",
   "extensions": ["excalidraw"],

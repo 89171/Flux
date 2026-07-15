@@ -2,7 +2,7 @@
   "id": "plaintext",
   "name": "Plain Text",
   "version": "1.0.0",
-  "author": "PaiNote",
+  "author": "Flux",
   "description": "Built-in plain text editor for .txt files.",
   "type": "format",
   "extensions": ["txt"],

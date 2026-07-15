@@ -46,7 +46,7 @@ export class WindowManager {
   constructor(isDev: boolean) {
     this.isDev = isDev
     this.autoLauncher = new AutoLaunch({
-      name: 'PaiNote',
+      name: 'Flux',
       isHidden: false
     })
   }

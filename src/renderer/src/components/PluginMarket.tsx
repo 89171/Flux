@@ -1,5 +1,5 @@
 /**
- * PaiNote Plugin Marketplace Page
+ * Flux Plugin Marketplace Page
  *
  * Full-page plugin marketplace with install bar, plugin cards grid,
  * enable/disable toggle, uninstall, and local plugin loading.

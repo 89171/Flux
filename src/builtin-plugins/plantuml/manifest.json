@@ -2,7 +2,7 @@
   "id": "plantuml",
   "name": "PlantUML",
   "version": "1.0.0",
-  "author": "PaiNote",
+  "author": "Flux",
   "description": "PlantUML source with live preview rendered by the official PlantUML server (network required). Bundled but not installed by default — enable from the market.",
   "type": "format",
   "extensions": ["puml"],

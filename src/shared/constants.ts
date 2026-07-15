@@ -1,6 +1,6 @@
-export const APP_NAME = 'PaiNote'
+export const APP_NAME = 'Flux'
 export const APP_VERSION = '1.0.0'
-export const DEFAULT_WORKSPACE = 'PaiNoteWorkspace'
+export const DEFAULT_WORKSPACE = 'FluxWorkspace'
 export const BUILTIN_PLUGINS_DIR = 'builtin-plugins'
 export const USER_PLUGINS_DIR = 'plugins'
 
@@ -26,3 +26,5 @@ export const NOTE_WINDOW_DEFAULT_HEIGHT = 600
 
 export const DEFAULT_AI_MODEL = 'gpt-4o-mini'
 export const DEFAULT_AI_BASE_URL = 'https://api.openai.com/v1'
+export const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1'
+export const DEFAULT_DEEPSEEK_MODEL = 'deepseek-chat'

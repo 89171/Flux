@@ -7,16 +7,25 @@ interface AIState {
   messages: AIMessage[]
   error: string | null
   isPanelOpen: boolean
+  /** Accumulated text from the current streaming response. Empty when
+   *  not generating. The AIPanel renders this live so the user sees
+   *  text appear chunk-by-chunk instead of a spinner. */
+  streamingContent: string
   attachments: Array<{ type: 'file' | 'image' | 'audio'; path: string; name: string }>
   togglePanel: () => void
   openPanel: () => void
   closePanel: () => void
   generate: (prompt: string, format: string, context?: string) => Promise<string | null>
+  cancelGenerate: () => void
   addAttachment: (attachment: { type: 'file' | 'image' | 'audio'; path: string; name: string }) => void
   clearAttachments: () => void
   clearMessages: () => void
   transcribe: (audioPath: string) => Promise<string | null>
 }
+
+/** Holds the IPC cleanup function for the active stream so the caller
+ *  can cancel listener registration without storing it in React state. */
+let streamCleanup: (() => void) | null = null
 
 export const useAIStore = create<AIState>((set, get) => ({
   isGenerating: false,
@@ -24,12 +33,14 @@ export const useAIStore = create<AIState>((set, get) => ({
   messages: [],
   error: null,
   isPanelOpen: false,
+  streamingContent: '',
   attachments: [],
   togglePanel: () => set((state) => ({ isPanelOpen: !state.isPanelOpen })),
   openPanel: () => set({ isPanelOpen: true }),
   closePanel: () => set({ isPanelOpen: false }),
+
   generate: async (prompt, format, context) => {
-    set({ isGenerating: true, error: null })
+    set({ isGenerating: true, error: null, streamingContent: '' })
     try {
       const request: AIRequest = {
         prompt,
@@ -40,26 +51,68 @@ export const useAIStore = create<AIState>((set, get) => ({
       }
       const userMsg: AIMessage = { role: 'user', content: prompt, timestamp: Date.now() }
       set((state) => ({ messages: [...state.messages, userMsg] }))
-      const result = await window.painote.ai.generate(request)
-      if (result.success && result.data) {
-        const aiMsg: AIMessage = { role: 'assistant', content: result.data.content, timestamp: Date.now() }
-        set((state) => ({ messages: [...state.messages, aiMsg], conversationId: result.data!.conversationId, isGenerating: false }))
-        return result.data.content
-      } else {
-        set({ isGenerating: false, error: result.error || 'AI generation failed' })
-        return null
-      }
+
+      let fullContent = ''
+
+      // ─── Streaming path ───
+      // Each chunk appends to streamingContent so the UI can render
+      // progressively. On done, the full text is committed as a
+      // finished AIMessage and streamingContent is cleared.
+      await new Promise<void>((resolve, reject) => {
+        streamCleanup = window.flux.ai.generateStream(
+          request,
+          (chunk) => {
+            fullContent += chunk
+            set({ streamingContent: fullContent })
+          },
+          (conversationId) => {
+            const aiMsg: AIMessage = {
+              role: 'assistant',
+              content: fullContent,
+              timestamp: Date.now()
+            }
+            set((state) => ({
+              messages: [...state.messages, aiMsg],
+              conversationId: conversationId || get().conversationId,
+              isGenerating: false,
+              streamingContent: ''
+            }))
+            streamCleanup = null
+            resolve()
+          },
+          (error) => {
+            set({ isGenerating: false, streamingContent: '', error })
+            streamCleanup = null
+            reject(new Error(error))
+          }
+        )
+      })
+
+      return fullContent || null
     } catch (err) {
-      set({ isGenerating: false, error: err instanceof Error ? err.message : String(err) })
+      set({
+        isGenerating: false,
+        streamingContent: '',
+        error: err instanceof Error ? err.message : String(err)
+      })
       return null
     }
   },
+
+  cancelGenerate: () => {
+    if (streamCleanup) {
+      streamCleanup()
+      streamCleanup = null
+    }
+    set({ isGenerating: false, streamingContent: '' })
+  },
+
   addAttachment: (attachment) => set((state) => ({ attachments: [...state.attachments, attachment] })),
   clearAttachments: () => set({ attachments: [] }),
   clearMessages: () => set({ messages: [], conversationId: null }),
   transcribe: async (audioPath) => {
     try {
-      const result = await window.painote.ai.transcribe(audioPath)
+      const result = await window.flux.ai.transcribe(audioPath)
       if (result.success && result.data) return result.data
       set({ error: result.error || 'Transcription failed' })
       return null

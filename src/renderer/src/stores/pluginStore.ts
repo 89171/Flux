@@ -33,7 +33,7 @@ export const usePluginStore = create<PluginState>((set) => ({
   loadPlugins: async () => {
     set({ isLoading: true })
     try {
-      const plugins = await window.painote.plugin.list()
+      const plugins = await window.flux.plugin.list()
       set({ plugins, isLoading: false })
     } catch (err) {
       console.error('Failed to load plugins:', err)
@@ -42,7 +42,7 @@ export const usePluginStore = create<PluginState>((set) => ({
   },
   loadFormatMap: async () => {
     try {
-      const map = await window.painote.plugin.getFormatMap()
+      const map = await window.flux.plugin.getFormatMap()
       set({ formatMap: map })
     } catch (err) {
       console.error('Failed to load format map:', err)
@@ -51,10 +51,10 @@ export const usePluginStore = create<PluginState>((set) => ({
   setFormatMap: (map) => set({ formatMap: map }),
   activatePlugin: async (id) => {
     try {
-      await window.painote.plugin.activate(id)
+      await window.flux.plugin.activate(id)
       const [plugins, formatMap] = await Promise.all([
-        window.painote.plugin.list(),
-        window.painote.plugin.getFormatMap()
+        window.flux.plugin.list(),
+        window.flux.plugin.getFormatMap()
       ])
       set({ plugins, formatMap })
     } catch (err) {
@@ -63,10 +63,10 @@ export const usePluginStore = create<PluginState>((set) => ({
   },
   deactivatePlugin: async (id) => {
     try {
-      await window.painote.plugin.deactivate(id)
+      await window.flux.plugin.deactivate(id)
       const [plugins, formatMap] = await Promise.all([
-        window.painote.plugin.list(),
-        window.painote.plugin.getFormatMap()
+        window.flux.plugin.list(),
+        window.flux.plugin.getFormatMap()
       ])
       set({ plugins, formatMap })
     } catch (err) {
@@ -75,13 +75,13 @@ export const usePluginStore = create<PluginState>((set) => ({
   },
   setPluginEnabled: async (id, enabled) => {
     try {
-      const result = await window.painote.plugin.setEnabled(id, enabled)
+      const result = await window.flux.plugin.setEnabled(id, enabled)
       // Refresh both lists — activation/deactivation changes plugin status
       // and format-map bindings; the market UI and file tree both consume
       // these, so we sync them together.
       const [plugins, formatMap] = await Promise.all([
-        window.painote.plugin.list(),
-        window.painote.plugin.getFormatMap()
+        window.flux.plugin.list(),
+        window.flux.plugin.getFormatMap()
       ])
       set({ plugins, formatMap })
       return result.success
@@ -94,9 +94,9 @@ export const usePluginStore = create<PluginState>((set) => ({
   installPlugin: async () => {
     set({ isInstalling: true, installMessage: null })
     try {
-      const result = await window.painote.plugin.install()
+      const result = await window.flux.plugin.install()
       if (result.success) {
-        const plugins = await window.painote.plugin.list()
+        const plugins = await window.flux.plugin.list()
         set({ plugins, isInstalling: false, installMessage: `Installed: ${result.plugin?.name}` })
         return { success: true }
       } else if (!result.canceled) {
@@ -113,9 +113,9 @@ export const usePluginStore = create<PluginState>((set) => ({
   loadLocalPlugin: async (path) => {
     set({ isInstalling: true, installMessage: null })
     try {
-      const result = await window.painote.plugin.loadLocal(path)
+      const result = await window.flux.plugin.loadLocal(path)
       if (result.success) {
-        const plugins = await window.painote.plugin.list()
+        const plugins = await window.flux.plugin.list()
         set({ plugins, isInstalling: false, installMessage: `Installed: ${result.plugin?.name}` })
         return { success: true }
       }
@@ -128,9 +128,9 @@ export const usePluginStore = create<PluginState>((set) => ({
   },
   uninstallPlugin: async (id) => {
     try {
-      const result = await window.painote.plugin.uninstall(id)
+      const result = await window.flux.plugin.uninstall(id)
       if (result.success) {
-        const plugins = await window.painote.plugin.list()
+        const plugins = await window.flux.plugin.list()
         set({ plugins })
         return { success: true }
       }
@@ -141,7 +141,7 @@ export const usePluginStore = create<PluginState>((set) => ({
   },
   openDevGuide: async () => {
     try {
-      await window.painote.plugin.openDevGuide()
+      await window.flux.plugin.openDevGuide()
     } catch (err) {
       console.error('Failed to open dev guide:', err)
     }

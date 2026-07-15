@@ -44,7 +44,15 @@ export default defineConfig({
       'process.env.NODE_ENV': JSON.stringify(
         process.env.NODE_ENV === 'production' ? 'production' : 'development'
       ),
-      'window.EXCALIDRAW_ASSET_PATH': JSON.stringify('/')
+      'window.EXCALIDRAW_ASSET_PATH': JSON.stringify('/'),
+      // tldraw commercial licence key. Read from the environment at
+      // build time so the key is not checked into source. Falls back
+      // to a build-time constant if the env var is absent (e.g. local
+      // dev without the secret). The runtime reads this global in
+      // WhiteboardEditor.tsx.
+      'window.FLUX_TLDRAW_LICENSE_KEY': JSON.stringify(
+        process.env.FLUX_TLDRAW_LICENSE_KEY ?? ''
+      )
     },
     optimizeDeps: {
       // Force pre-bundling for these — they're CJS-only and need

@@ -11,7 +11,7 @@ import type { PluginManager } from './PluginManager'
 import { DEFAULT_AI_MODEL, DEFAULT_AI_BASE_URL } from '@shared/constants'
 
 interface AIConfigOptions {
-  provider?: 'openai' | 'anthropic' | 'local' | 'none'
+  provider?: 'openai' | 'anthropic' | 'deepseek' | 'kimi' | 'minimax' | 'glm' | 'local' | 'none'
   apiKey?: string
   model?: string
   baseUrl?: string
@@ -37,7 +37,7 @@ export class AIService {
   private apiKey: string = ''
   private model: string = DEFAULT_AI_MODEL
   private baseUrl: string = DEFAULT_AI_BASE_URL
-  private provider: 'openai' | 'anthropic' | 'local' | 'none' = 'none'
+  private provider: 'openai' | 'anthropic' | 'deepseek' | 'kimi' | 'minimax' | 'glm' | 'local' | 'none' = 'none'
 
   constructor(private pluginManager: PluginManager) {}
 
@@ -46,6 +46,70 @@ export class AIService {
     if (opts.apiKey !== undefined) this.apiKey = opts.apiKey
     if (opts.model !== undefined) this.model = opts.model
     if (opts.baseUrl !== undefined) this.baseUrl = opts.baseUrl
+  }
+
+  /**
+   * Test an unsaved AI configuration with a minimal round-trip request.
+   * Temporarily swaps in the candidate config, fires one short "ping"
+   * chat, then restores the previously-active config — so a failed test
+   * never leaves the service in a broken state for real generate calls.
+   *
+   * Returns { success: true } on a 2xx response, or { success: false,
+   * error } with a human-readable message. The caller (Settings panel)
+   * gates Save on this result.
+   */
+  async testConfig(opts: AIConfigOptions): Promise<{ success: boolean; error?: string }> {
+    // 'none' / missing provider is not a configuration we can probe —
+    // treat as a skip so the user can still disable AI via Save.
+    if (!opts.provider || opts.provider === 'none') {
+      return { success: true }
+    }
+
+    // For non-local providers an API key is mandatory. Without one,
+    // callAI() would silently fall back to the mock responder and we'd
+    // report a false positive — so gate explicitly here.
+    if (opts.provider !== 'local' && !opts.apiKey) {
+      return { success: false, error: 'API key is required' }
+    }
+
+    const saved = {
+      provider: this.provider,
+      apiKey: this.apiKey,
+      model: this.model,
+      baseUrl: this.baseUrl
+    }
+
+    try {
+      this.configure(opts)
+
+      // 15s hard cap so a wrong baseUrl / unreachable host doesn't
+      // hang the Save button indefinitely. abort → fetch rejects → we
+      // surface a friendly "timed out" message.
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 15000)
+      try {
+        await this.callAI(
+          [{ role: 'user', content: 'Reply with the single word: ok' }],
+          controller.signal
+        )
+        return { success: true }
+      } finally {
+        clearTimeout(timeout)
+      }
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err)
+      // fetch aborts surface as "The operation was aborted" — make it readable.
+      const message =
+        raw.includes('aborted') || raw.includes('AbortError')
+          ? `Request timed out after 15s — check Base URL and network`
+          : raw
+      return { success: false, error: message }
+    } finally {
+      this.provider = saved.provider
+      this.apiKey = saved.apiKey
+      this.model = saved.model
+      this.baseUrl = saved.baseUrl
+    }
   }
 
   isConfigured(): boolean {
@@ -125,6 +189,46 @@ export class AIService {
 
   async chat(request: AIRequest): Promise<AIResponse> {
     return this.generate(request)
+  }
+
+  async *generateStream(request: AIRequest): AsyncGenerator<string, void, unknown> {
+    const conversationId = request.conversationId || this.generateConversationId()
+    const adapter = this.pluginManager.getAIAdapter(request.format)
+    const systemPrompt = adapter?.systemPrompt || this.getDefaultSystemPrompt(request.format)
+
+    let conversation = this.conversations.get(conversationId)
+    if (!conversation) {
+      conversation = { id: conversationId, noteId: conversationId, messages: [], createdAt: Date.now() }
+      this.conversations.set(conversationId, conversation)
+    }
+
+    const userMessage: AIMessage = {
+      role: 'user',
+      content: request.context ? `${request.context}\n\n${request.prompt}` : request.prompt,
+      timestamp: Date.now()
+    }
+    conversation.messages.push(userMessage)
+
+    const apiMessages: AIMessageEntry[] = [{ role: 'system', content: systemPrompt }]
+    for (const msg of conversation.messages) {
+      apiMessages.push({ role: msg.role, content: msg.content })
+    }
+
+    const abortController = new AbortController()
+    this.activeRequests.set(conversationId, abortController)
+
+    try {
+      let fullContent = ''
+      for await (const chunk of this.callAIStream(apiMessages, abortController.signal)) {
+        fullContent += chunk
+        yield chunk
+      }
+
+      const parsedContent = adapter?.parseResponse ? adapter.parseResponse(fullContent) : fullContent
+      conversation.messages.push({ role: 'assistant', content: parsedContent, timestamp: Date.now() })
+    } finally {
+      this.activeRequests.delete(conversationId)
+    }
   }
 
   async transcribe(audioPath: string): Promise<string> {
@@ -213,11 +317,66 @@ export class AIService {
       return this.callLocalAI(messages, signal)
     }
 
-    if (this.provider === 'openai') {
+    if (this.provider === 'anthropic') {
+      return this.callAnthropic(messages, signal)
+    }
+
+    // All OpenAI-compatible providers share the same Authorization:
+    // Bearer <key> header and /chat/completions path. DeepSeek, Kimi
+    // (Moonshot), MiniMax, and GLM (Zhipu) all publish OpenAI-compatible
+    // endpoints — the only thing that differs is baseUrl + model + apiKey.
+    if (
+      this.provider === 'openai' ||
+      this.provider === 'deepseek' ||
+      this.provider === 'kimi' ||
+      this.provider === 'minimax' ||
+      this.provider === 'glm'
+    ) {
       return this.callOpenAI(messages, signal)
     }
 
     throw new Error(`Unsupported AI provider: ${this.provider}`)
+  }
+
+  private async callAnthropic(
+    messages: AIMessageEntry[],
+    signal?: AbortSignal
+  ): Promise<AICallResult> {
+    // Extract system message from messages array
+    const systemMessage = messages.find(m => m.role === 'system')
+    const conversationMessages = messages.filter(m => m.role !== 'system')
+
+    const response = await fetch(`${this.baseUrl}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': this.apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: this.model,
+        max_tokens: 4096,
+        system: systemMessage?.content || '',
+        messages: conversationMessages.map(m => ({ role: m.role, content: m.content }))
+      }),
+      signal
+    })
+
+    if (!response.ok) {
+      throw new Error(`Anthropic API request failed: ${response.statusText}`)
+    }
+
+    const data = await response.json() as {
+      content: Array<{ type: string; text: string }>
+      usage?: { input_tokens: number; output_tokens: number }
+    }
+
+    return {
+      content: data.content?.[0]?.text || '',
+      usage: data.usage
+        ? { promptTokens: data.usage.input_tokens, completionTokens: data.usage.output_tokens }
+        : undefined
+    }
   }
 
   private async callLocalAI(
@@ -281,6 +440,126 @@ export class AIService {
             completionTokens: data.usage.completion_tokens
           }
         : undefined
+    }
+  }
+
+  private async *callAIStream(
+    messages: AIMessageEntry[],
+    signal?: AbortSignal
+  ): AsyncGenerator<string, void, unknown> {
+    if (!this.isConfigured()) {
+      yield this.generateMockResponse(messages)
+      return
+    }
+
+    // All OpenAI-compatible providers (openai, deepseek, local) support streaming
+    const isAnthropic = this.provider === 'anthropic'
+
+    if (isAnthropic) {
+      yield* this.callAnthropicStream(messages, signal)
+    } else {
+      yield* this.callOpenAIStream(messages, signal)
+    }
+  }
+
+  private async *callOpenAIStream(
+    messages: AIMessageEntry[],
+    signal?: AbortSignal
+  ): AsyncGenerator<string, void, unknown> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (this.provider !== 'local') {
+      headers['Authorization'] = `Bearer ${this.apiKey}`
+    }
+
+    const response = await fetch(`${this.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ model: this.model, messages, stream: true }),
+      signal
+    })
+
+    if (!response.ok) {
+      throw new Error(`AI stream request failed: ${response.statusText}`)
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('No response body')
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed || !trimmed.startsWith('data: ')) continue
+        const data = trimmed.slice(6)
+        if (data === '[DONE]') return
+        try {
+          const parsed = JSON.parse(data)
+          const delta = parsed.choices?.[0]?.delta?.content
+          if (delta) yield delta
+        } catch { /* skip malformed chunks */ }
+      }
+    }
+  }
+
+  private async *callAnthropicStream(
+    messages: AIMessageEntry[],
+    signal?: AbortSignal
+  ): AsyncGenerator<string, void, unknown> {
+    const systemMessage = messages.find(m => m.role === 'system')
+    const conversationMessages = messages.filter(m => m.role !== 'system')
+
+    const response = await fetch(`${this.baseUrl}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': this.apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: this.model,
+        max_tokens: 4096,
+        system: systemMessage?.content || '',
+        messages: conversationMessages.map(m => ({ role: m.role, content: m.content })),
+        stream: true
+      }),
+      signal
+    })
+
+    if (!response.ok) {
+      throw new Error(`Anthropic stream request failed: ${response.statusText}`)
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('No response body')
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed.startsWith('data: ')) continue
+        try {
+          const parsed = JSON.parse(trimmed.slice(6))
+          if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+            yield parsed.delta.text
+          }
+        } catch { /* skip */ }
+      }
     }
   }
 
@@ -348,7 +627,7 @@ This content was generated as a placeholder. Configure your AI settings in Prefe
 
   private generateMockDrawio(prompt: string): string {
     const topic = prompt.substring(0, 30).replace(/\n/g, ' ').trim() || 'Central'
-    return `<mxfile host="app.diagrams.net" modified="2024-01-01T00:00:00.000Z" agent="PaiNote" version="1.0.0">
+    return `<mxfile host="app.diagrams.net" modified="2024-01-01T00:00:00.000Z" agent="Flux" version="1.0.0">
   <diagram name="Page-1" id="mock-diagram">
     <mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
       <root>
@@ -384,17 +663,31 @@ This content was generated as a placeholder. Configure your AI settings in Prefe
   private getDefaultSystemPrompt(format: NoteFormat): string {
     switch (format) {
       case 'markdown':
-        return 'You are a helpful assistant that generates well-formatted Markdown notes. Use headings, lists, and code blocks appropriately.'
+        return 'You are an expert Markdown assistant. You can create, edit, and transform Markdown documents. Generate well-structured content with headings, lists, tables, code blocks, and blockquotes. When the user provides existing content, improve or transform it based on their request. Always respond with valid Markdown.'
+      case 'mermaid':
+        return 'You are an expert at creating Mermaid diagrams. Generate valid Mermaid syntax for flowcharts, sequence diagrams, class diagrams, state diagrams, ER diagrams, and Gantt charts. Only output the Mermaid code inside a ```mermaid code block, no explanations. Use proper node shapes, arrow types, and styling. Example flowchart:\n\n```mermaid\nflowchart TD\n    A[Start] --> B{Decision}\n    B -->|Yes| C[Action 1]\n    B -->|No| D[Action 2]\n    C --> E[End]\n    D --> E\n```'
+      case 'plantuml':
+        return 'You are an expert at creating PlantUML diagrams. Generate valid PlantUML syntax for sequence diagrams, class diagrams, use case diagrams, activity diagrams, component diagrams, and state diagrams. Wrap the PlantUML code between @startuml and @enduml tags. Only output the PlantUML code, no explanations. Example:\n\n@startuml\nstart\n:Action;\nif (Condition?) then (yes)\n  :Do something;\nelse (no)\n  :Do other;\nendif\nstop\n@enduml'
       case 'mindmap':
-        return 'You are a helpful assistant that generates mind maps. Use # for the central topic, ## for main branches, and ### for sub-branches.'
+        return 'You are a helpful assistant that generates mind maps using Markdown headings. Use # for the central topic, ## for main branches, and ### for sub-branches. Keep each heading concise (3-5 words). Generate a well-structured hierarchy with 3-5 main branches.'
       case 'drawio':
-        return 'You are a helpful assistant that generates draw.io XML diagrams. Return valid mxfile XML with mxGraphModel and mxCell elements.'
+        return 'You are an expert at creating draw.io diagrams. Generate valid mxfile XML with mxGraphModel and mxCell elements. Use proper styles for shapes (rectangles, ellipses, rhombus), edges, and labels. Include vertex and edge cells with geometry. Only output the XML, no explanations.'
+      case 'bpmn':
+        return 'You are an expert at creating BPMN 2.0 diagrams. Generate valid BPMN XML with proper process, startEvent, task, gateway, and endEvent elements. Only output the XML.'
+      case 'dmn':
+        return 'You are an expert at creating DMN 1.3 decision tables. Generate valid DMN XML with definitions, decision, decisionTable, input, output, and rule elements. Only output the XML.'
+      case 'kanban':
+        return 'You are a helpful assistant that generates Kanban board content. Create a Markdown-based kanban with columns like ## To Do, ## In Progress, ## Done, and tasks as list items with [ ] or [x] checkboxes.'
+      case 'excalidraw':
+        return 'You are a helpful assistant that generates Excalidraw-compatible JSON. Generate valid JSON with type, version, elements array, and appState.'
+      case 'plaintext':
+        return 'You are a helpful assistant. Respond with clear, well-organized plain text.'
       default:
-        return 'You are a helpful assistant that generates clear and useful notes.'
+        return 'You are a helpful assistant that generates clear and useful content.'
     }
   }
 
-  private generateConversationId(): string {
+  generateConversationId(): string {
     return `conv_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
   }
 }

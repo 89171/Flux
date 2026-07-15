@@ -2,7 +2,7 @@
  * PluginIframeEditor
  *
  * Mounts a third-party editor inside a sandboxed iframe and speaks the
- * PaiNote plugin-editor postMessage protocol with it.
+ * Flux plugin-editor postMessage protocol with it.
  *
  * Security posture:
  *   - The iframe uses `sandbox="allow-scripts"` — no allow-same-origin,

@@ -2,7 +2,7 @@
   "id": "mindmap",
   "name": "Mindmap",
   "version": "1.0.0",
-  "author": "PaiNote",
+  "author": "Flux",
   "description": "Built-in mindmap editor for visual thinking and brainstorming, powered by Mind-Elixir.",
   "type": "format",
   "extensions": ["mm", "mindmap"],

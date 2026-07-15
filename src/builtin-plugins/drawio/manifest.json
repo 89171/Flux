@@ -2,7 +2,7 @@
   "id": "drawio",
   "name": "DrawIO",
   "version": "1.0.0",
-  "author": "PaiNote",
+  "author": "Flux",
   "description": "Built-in DrawIO diagram editor for flowcharts and diagrams.",
   "type": "format",
   "extensions": ["drawio"],

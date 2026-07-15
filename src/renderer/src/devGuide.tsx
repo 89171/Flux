@@ -1,5 +1,5 @@
 /**
- * PaiNote Plugin Development Guide
+ * Flux Plugin Development Guide
  *
  * A static read-only page displayed in a separate window.
  * Renders the guide content as formatted HTML.
@@ -12,11 +12,11 @@ import './styles/global.css'
 import './styles/components.css'
 
 const guideMarkdown = `
-# PaiNote Plugin Development Guide
+# Flux Plugin Development Guide
 
 ## Overview
 
-PaiNote supports a plugin system that allows you to extend the app with custom formats, tools, and themes. This guide covers everything you need to know to build your own plugins.
+Flux supports a plugin system that allows you to extend the app with custom formats, tools, and themes. This guide covers everything you need to know to build your own plugins.
 
 ## Plugin Structure
 
@@ -54,21 +54,21 @@ my-plugin/
 - **extensions**: File extensions this plugin handles (for format plugins).
 - **main** (required): Entry point JavaScript file.
 - **icon**: Path to an icon image (PNG, 24x24 recommended).
-- **minAppVersion**: Minimum PaiNote version required.
+- **minAppVersion**: Minimum Flux version required.
 
 ## Plugin Types
 
 ### Format Plugins
 
-Format plugins handle custom file types. When a user opens a file with a registered extension, PaiNote loads your plugin to render and edit the content.
+Format plugins handle custom file types. When a user opens a file with a registered extension, Flux loads your plugin to render and edit the content.
 
 ### Tool Plugins
 
-Tool plugins add new tools or features to PaiNote. They can add menu items, toolbar buttons, or background functionality.
+Tool plugins add new tools or features to Flux. They can add menu items, toolbar buttons, or background functionality.
 
 ### Theme Plugins
 
-Theme plugins provide custom visual themes for PaiNote.
+Theme plugins provide custom visual themes for Flux.
 
 ## Plugin Lifecycle
 
@@ -95,7 +95,7 @@ module.exports = {
 
 ## Plugin Context
 
-The \`ctx\` object provides access to PaiNote APIs:
+The \`ctx\` object provides access to Flux APIs:
 
 \`\`\`javascript
 module.exports = {
@@ -117,13 +117,13 @@ module.exports = {
 ### From Directory
 
 1. Create a plugin directory with the structure above.
-2. In PaiNote, open Plugin Market.
+2. In Flux, open Plugin Market.
 3. Paste the directory path in the input field and click "Load".
 
 ### From File
 
 1. Package your plugin directory as a ZIP file.
-2. In PaiNote, open Plugin Market.
+2. In Flux, open Plugin Market.
 3. Click "Install Plugin" and select the ZIP file.
 
 ## Testing
@@ -146,7 +146,7 @@ During development, you can load your plugin from a local directory. Changes to 
   "id": "csv-viewer",
   "name": "CSV Viewer",
   "version": "1.0.0",
-  "author": "PaiNote",
+  "author": "Flux",
   "description": "Render CSV files as tables",
   "type": "format",
   "extensions": ["csv"],
@@ -166,6 +166,119 @@ module.exports = {
     return '<table>' + table + '</table>'
   }
 }
+\`\`\`
+
+## AI Integration
+
+Flux provides a built-in AI assistant that can generate and transform content for any format. Plugins can customize how AI interacts with their format by providing an **AI Format Adapter**.
+
+### AIFormatAdapter Interface
+
+\`\`\`typescript
+interface AIFormatAdapter {
+  /** System prompt that instructs the AI how to generate content for this format */
+  systemPrompt: string
+  /** Post-process the AI's raw response (e.g. strip markdown fences, validate XML) */
+  parseResponse: (response: string) => string
+  /** Format the current document content before sending to AI as context */
+  formatContext?: (content: string) => string
+  /** Suggested prompts shown in the AI panel when this format is active */
+  suggestedPrompts?: string[]
+  /** Validate AI-generated content before applying. Returns error message or null if valid */
+  validateResponse?: (response: string) => string | null
+}
+\`\`\`
+
+### How It Works
+
+1. When the user opens the AI panel and sends a prompt, Flux checks if the current file's format plugin provides an \`aiAdapter\`.
+2. If found, the adapter's \`systemPrompt\` replaces the default system prompt.
+3. If \`formatContext\` is provided, it wraps the current document content before sending to the AI.
+4. The AI's response is passed through \`parseResponse\` for cleanup (e.g. stripping code fences).
+5. If \`validateResponse\` is provided, the response is validated before being applied.
+6. \`suggestedPrompts\` are shown as quick-action buttons in the AI panel.
+
+### Example: Plugin with AI Adapter
+
+\`\`\`javascript
+// main.js
+module.exports = {
+  onActivate(ctx) {
+    ctx.logger.info('My format plugin activated')
+  },
+  format: {
+    format: 'myformat',
+    aiAdapter: {
+      systemPrompt: 'You are an expert at generating MyFormat content. Follow the syntax rules: ...',
+      parseResponse: (response) => {
+        // Clean up the AI response
+        let content = response.trim()
+        // Remove wrapping code fences if present
+        const match = content.match(/^\`\`\`(?:myformat)?\\n([\\s\\S]*?)\\n\`\`\`$/)
+        if (match) content = match[1]
+        return content
+      },
+      formatContext: (content) => {
+        return \`Current document:\\n\${content}\\n\\n---\\nPlease modify the above.\`
+      },
+      suggestedPrompts: [
+        'Create a new document from scratch',
+        'Add examples to each section',
+        'Convert to JSON'
+      ],
+      validateResponse: (response) => {
+        if (!response.includes('required-keyword')) {
+          return 'Response must contain required-keyword'
+        }
+        return null
+      }
+    }
+  }
+}
+\`\`\`
+
+### Supported AI Providers
+
+Flux supports the following AI providers (configurable in Settings):
+
+| Provider | Models | Base URL |
+|---|---|---|
+| OpenAI | gpt-4o, gpt-4o-mini, etc. | https://api.openai.com/v1 |
+| DeepSeek | deepseek-chat, deepseek-reasoner | https://api.deepseek.com/v1 |
+| Anthropic Claude | claude-sonnet-4-20250514, etc. | https://api.anthropic.com |
+| Local | Ollama, LM Studio | http://localhost:11434/v1 |
+
+DeepSeek and OpenAI use the same API format (OpenAI-compatible), so any model that supports the OpenAI chat completions API will work.
+
+### Best Practices for AI Adapters
+
+1. **Be specific in system prompts**: Tell the AI exactly what syntax to use, include examples.
+2. **Always clean up responses**: AI models often wrap output in code fences — use \`parseResponse\` to strip them.
+3. **Validate critical formats**: Use \`validateResponse\` to catch obviously broken output before it reaches the editor.
+4. **Provide helpful suggested prompts**: Guide users toward capabilities they might not discover.
+5. **Format context clearly**: When sending existing content to AI, wrap it with clear markers so the AI knows what to operate on.
+6. **Keep system prompts concise**: Very long prompts increase cost and latency. Focus on syntax rules and output format.
+
+### AI Response Flow
+
+\`\`\`
+User sends prompt
+    ↓
+Flux checks for format plugin's aiAdapter
+    ↓
+Builds system prompt (adapter.systemPrompt or default)
+    ↓
+Formats context (adapter.formatContext or raw content)
+    ↓
+Sends to AI provider (OpenAI/DeepSeek/Anthropic/Local)
+    ↓
+Receives response
+    ↓
+Parses response (adapter.parseResponse)
+    ↓
+Validates response (adapter.validateResponse)
+    ↓
+Displays in AI panel → User can "Replace" or "Append" to note
 \`\`\`
 `
 

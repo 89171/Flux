@@ -2,7 +2,7 @@
   "id": "dmn",
   "name": "DMN",
   "version": "1.0.0",
-  "author": "PaiNote",
+  "author": "Flux",
   "description": "DMN 1.3 decision requirements diagram viewer/editor (dmn-js). Bundled but not installed by default — enable from the market.",
   "type": "format",
   "extensions": ["dmn"],

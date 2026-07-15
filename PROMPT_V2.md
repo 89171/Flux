@@ -1,6 +1,6 @@
-# PaiNote 开发 Prompt（完整版）
+# Flux 开发 Prompt（完整版）
 
-帮我开发一款名为 PaiNote 的 Electron 桌面笔记本应用。以下需求已经过充分细化，请严格按照每一条规范实现，不要遗漏任何细节。每个功能模块完成后必须能正常编译运行，不能出现「代码写了但功能不工作」的情况。
+帮我开发一款名为 Flux 的 Electron 桌面笔记本应用。以下需求已经过充分细化，请严格按照每一条规范实现，不要遗漏任何细节。每个功能模块完成后必须能正常编译运行，不能出现「代码写了但功能不工作」的情况。
 
 ---
 
@@ -41,7 +41,7 @@ src/builtin-plugins/
   "id": "markdown",
   "name": "Markdown",
   "version": "1.0.0",
-  "author": "PaiNote",
+  "author": "Flux",
   "description": "Built-in Markdown editor with WYSIWYG support via Milkdown.",
   "type": "format",
   "extensions": ["md", "markdown"],
@@ -144,14 +144,14 @@ const noteWindow = new BrowserWindow({
 
 ```typescript
 // 主窗口 TitleBar：不包含自定义按钮，不包含图钉图标
-// "PaiNote" 文字居中，左右各留 78px 给系统交通灯按钮
+// "Flux" 文字居中，左右各留 78px 给系统交通灯按钮
 export function TitleBar() {
   return (
     <div style={{ display: 'flex', alignItems: 'center', height: '40px',
       WebkitAppRegion: 'drag', borderBottom: '1px solid var(--border-light)' }}>
       <div style={{ width: '78px' }} />           {/* 左侧交通灯空间 */}
       <div style={{ flex: 1, textAlign: 'center' }}>
-        <span style={{ fontSize: '13px', fontWeight: 600 }}>PaiNote</span>
+        <span style={{ fontSize: '13px', fontWeight: 600 }}>Flux</span>
       </div>
       <div style={{ width: '78px' }} />           {/* 右侧对称空间 */}
     </div>
@@ -444,7 +444,7 @@ import '@milkdown/theme-nord/style.css'
 
 ```
 ┌──────────────────────────────────────────┐
-│              PaiNote (居中)               │  ← TitleBar (40px, 系统红黄绿)
+│              Flux (居中)               │  ← TitleBar (40px, 系统红黄绿)
 ├────┬─────────┬──────────────────┬────────┤
 │ A  │ Sidebar │     Editor       │   AI   │
 │ B  │ 240px   │                  │ Panel  │
@@ -556,7 +556,7 @@ src/
 - 实现 main/WindowManager.ts
   - 主窗口：`titleBarStyle: 'hidden'`（系统红黄绿），**不要 frame: false**
   - 笔记窗口：`frame: false`（自定义标题栏）
-- 实现 TitleBar.tsx（PaiNote 居中，无自定义按钮，无图钉）
+- 实现 TitleBar.tsx（Flux 居中，无自定义按钮，无图钉）
 
 ### Step 5: 文件浏览器
 - 实现 Sidebar.tsx（参考 VSCode）
@@ -626,7 +626,7 @@ src/
 
 ## 七、验收标准
 
-- [ ] `npm run dev` 启动后，主窗口显示系统红黄绿按钮，PaiNote 居中
+- [ ] `npm run dev` 启动后，主窗口显示系统红黄绿按钮，Flux 居中
 - [ ] 侧边栏 3 个操作按钮无边框、图标居中、16px 尺寸
 - [ ] 点击"新建文件"弹出下拉菜单，列出 Markdown/Plain Text/DrawIO/Mindmap
 - [ ] 选择文件类型后，创建输入框出现，预填 `Untitled.{扩展名}`，自动聚焦选中

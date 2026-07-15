@@ -1,5 +1,5 @@
 /**
- * PaiNote Note Window Entry
+ * Flux Note Window Entry
  *
  * A standalone note window for pinned/floating notes.
  * Uses Milkdown WYSIWYG editor for Markdown files,
@@ -31,6 +31,11 @@ interface NoteData {
 }
 
 type SaveStatus = 'saved' | 'saving' | 'unsaved'
+
+const DEFAULT_FONT_SIZE = 14
+const MIN_FONT_SIZE = 10
+const MAX_FONT_SIZE = 28
+const FONT_SIZE_STEP = 2
 
 const titlebarStyle: CSSProperties = {
   display: 'flex',
@@ -75,6 +80,7 @@ function NoteApp() {
   const [isPinned, setIsPinned] = useState(false)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved')
   const [isLoading, setIsLoading] = useState(true)
+  const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const latestContentRef = useRef('')
   const hasFlushedRef = useRef(false)
@@ -84,12 +90,12 @@ function NoteApp() {
 
   // Listen for note:loaded IPC event
   useEffect(() => {
-    const cleanup = window.painote.on.noteLoaded(async (data: unknown) => {
+    const cleanup = window.flux.on.noteLoaded(async (data: unknown) => {
       const noteInfo = data as NoteData
       setNoteData(noteInfo)
       setIsPinned(noteInfo.isPinned)
       try {
-        const { content: fileContent, mtime } = await window.painote.file.readMeta(
+        const { content: fileContent, mtime } = await window.flux.file.readMeta(
           noteInfo.notePath
         )
         setContent(fileContent)
@@ -108,7 +114,7 @@ function NoteApp() {
   // the broadcast — the user's in-flight typing wins locally and a conflict
   // will surface on the next save.
   useEffect(() => {
-    const unsubscribe = window.painote.file.onChanged((payload) => {
+    const unsubscribe = window.flux.file.onChanged((payload) => {
       if (!noteData || payload.path !== noteData.notePath) return
       if (isDirtyRef.current || saveStatus !== 'saved') return
       setContent(payload.content)
@@ -134,7 +140,7 @@ function NoteApp() {
         if (!noteData) return
         setSaveStatus('saving')
         try {
-          const result = await window.painote.file.writeGuarded(
+          const result = await window.flux.file.writeGuarded(
             noteData.notePath,
             latestContentRef.current,
             mtimeRef.current
@@ -183,12 +189,12 @@ function NoteApp() {
         saveTimerRef.current = null
       }
 
-      window.painote.file
+      window.flux.file
         .writeGuarded(noteData.notePath, latestContentRef.current, mtimeRef.current)
         .catch((err) => console.error('Failed to autosave on close:', err))
         .finally(() => {
           hasFlushedRef.current = true
-          window.painote.window.close(noteData.noteId)
+          window.flux.window.close(noteData.noteId)
         })
     }
     window.addEventListener('beforeunload', handleBeforeUnload)
@@ -199,7 +205,7 @@ function NoteApp() {
   const handlePinToggle = useCallback(async () => {
     if (!noteData) return
     try {
-      await window.painote.window.togglePin(noteData.noteId)
+      await window.flux.window.togglePin(noteData.noteId)
       setIsPinned((prev) => !prev)
     } catch (err) {
       console.error('Failed to toggle pin:', err)
@@ -209,18 +215,18 @@ function NoteApp() {
   // Close
   const handleClose = useCallback(() => {
     if (noteData) {
-      window.painote.window.close(noteData.noteId)
+      window.flux.window.close(noteData.noteId)
     }
   }, [noteData])
 
   // Minimize
   const handleMinimize = useCallback(() => {
-    window.painote.window.minimizeFrame()
+    window.flux.window.minimizeFrame()
   }, [])
 
   const isMarkdown = noteData?.format === 'markdown'
 
-  // Keyboard shortcut: Cmd/Ctrl+S to save immediately
+  // Keyboard shortcut: Cmd/Ctrl+S to save immediately, Cmd/Ctrl+/-/0 to zoom
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -230,7 +236,7 @@ function NoteApp() {
         }
         if (noteData) {
           setSaveStatus('saving')
-          window.painote.file
+          window.flux.file
             .writeGuarded(noteData.notePath, latestContentRef.current, mtimeRef.current)
             .then((result) => {
               if (result.ok) {
@@ -244,6 +250,18 @@ function NoteApp() {
             })
             .catch(() => setSaveStatus('unsaved'))
         }
+      }
+      if ((e.metaKey || e.ctrlKey) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault()
+        setFontSize((prev) => Math.min(prev + FONT_SIZE_STEP, MAX_FONT_SIZE))
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === '-') {
+        e.preventDefault()
+        setFontSize((prev) => Math.max(prev - FONT_SIZE_STEP, MIN_FONT_SIZE))
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === '0') {
+        e.preventDefault()
+        setFontSize(DEFAULT_FONT_SIZE)
       }
     }
     window.addEventListener('keydown', handler)
@@ -378,7 +396,7 @@ function NoteApp() {
       </div>
 
       {/* Content */}
-      <div className="note-content">
+      <div className="note-content" style={{ fontSize: `${fontSize}px` }}>
         {isMarkdown ? (
           <MilkdownEditor
             value={content}
@@ -398,7 +416,7 @@ function NoteApp() {
               resize: 'none',
               padding: '16px 20px',
               fontFamily: 'var(--font-mono)',
-              fontSize: '14px',
+              fontSize: 'inherit',
               lineHeight: 1.7,
               color: 'var(--text-primary)',
               backgroundColor: 'transparent',

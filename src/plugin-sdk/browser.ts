@@ -1,5 +1,5 @@
 /**
- * PaiNote plugin-editor browser SDK.
+ * Flux plugin-editor browser SDK.
  *
  * Drop this file into your plugin's iframe entry HTML and call
  * `createPluginEditor()` to speak the host protocol without hand-rolling
@@ -8,7 +8,7 @@
  * Basic usage:
  *
  *   <script type="module">
- *     import { createPluginEditor } from './painote-editor.js'
+ *     import { createPluginEditor } from './flux-editor.js'
  *     const editor = createPluginEditor({
  *       onInit: ({ content, filePath }) => renderMyUI(content),
  *       onExternalUpdate: ({ content }) => renderMyUI(content),
@@ -99,7 +99,7 @@ interface HostMessageEnvelope {
 export function createPluginEditor(handlers: PluginEditorHandlers): PluginEditorHandle {
   if (typeof window === 'undefined' || window.parent === window) {
     throw new Error(
-      'createPluginEditor must run inside a PaiNote plugin iframe (window.parent is required).'
+      'createPluginEditor must run inside a Flux plugin iframe (window.parent is required).'
     )
   }
   const parent = window.parent

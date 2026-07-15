@@ -1,5 +1,5 @@
 /**
- * PaiNote Sidebar - VSCode-style File Explorer
+ * Flux Sidebar - VSCode-style File Explorer
  *
  * Features:
  *  - Collapsible folder tree (chevron + folder/file icons)
@@ -697,7 +697,7 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const handleOpenExternal = useCallback(async (node: NoteFile) => {
     setContextMenu(null)
     try {
-      await window.painote.file.openExternal(node.path)
+      await window.flux.file.openExternal(node.path)
     } catch (err) {
       console.error('Failed to open externally:', err)
     }

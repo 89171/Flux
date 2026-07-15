@@ -2,7 +2,7 @@
   "id": "json-editor",
   "name": "JSON Editor",
   "version": "1.0.0",
-  "author": "PaiNote Examples",
+  "author": "Flux Examples",
   "description": "A tiny sample plugin that opens .json files in a bracket-highlighted textarea with a 'prettify' button. Demonstrates the iframe-editor protocol.",
   "type": "format",
   "extensions": ["json"],

@@ -40,7 +40,7 @@ export const useFileStore = create<FileState>((set, get) => ({
   loadTree: async () => {
     set({ isLoading: true })
     try {
-      const tree = await window.painote.file.getTree()
+      const tree = await window.flux.file.getTree()
       const treeArray = Array.isArray(tree) ? tree : (tree as NoteFile).children || []
       set({ tree: treeArray, isLoading: false })
     } catch (err) {
@@ -63,7 +63,7 @@ export const useFileStore = create<FileState>((set, get) => ({
     // conflict aborts the switch instead of clobbering another window's edits.
     if (state.isDirty && state.currentFile) {
       try {
-        const result = await window.painote.file.writeGuarded(
+        const result = await window.flux.file.writeGuarded(
           state.currentFile.path,
           state.currentContent,
           state.currentMtime
@@ -79,7 +79,7 @@ export const useFileStore = create<FileState>((set, get) => ({
       }
     }
     try {
-      const { content, mtime } = await window.painote.file.readMeta(file.path)
+      const { content, mtime } = await window.flux.file.readMeta(file.path)
       set({
         currentFile: file,
         currentContent: content,
@@ -105,7 +105,7 @@ export const useFileStore = create<FileState>((set, get) => ({
     const { currentFile, currentContent, currentMtime } = get()
     if (!currentFile) return
     try {
-      const result = await window.painote.file.writeGuarded(
+      const result = await window.flux.file.writeGuarded(
         currentFile.path,
         currentContent,
         currentMtime
@@ -130,7 +130,7 @@ export const useFileStore = create<FileState>((set, get) => ({
     const { currentFile } = get()
     if (!currentFile) return
     try {
-      const { content, mtime } = await window.painote.file.readMeta(currentFile.path)
+      const { content, mtime } = await window.flux.file.readMeta(currentFile.path)
       set({
         currentContent: content,
         currentMtime: mtime,
@@ -162,7 +162,7 @@ export const useFileStore = create<FileState>((set, get) => ({
   createFile: async (parentPath, name, isDir) => {
     const path = parentPath ? `${parentPath}/${name}` : name
     try {
-      await window.painote.file.create(path, '', isDir)
+      await window.flux.file.create(path, '', isDir)
     } catch (err) {
       console.error('Failed to create file:', err)
       throw err
@@ -171,7 +171,7 @@ export const useFileStore = create<FileState>((set, get) => ({
 
   deleteFile: async (path) => {
     try {
-      await window.painote.file.delete(path)
+      await window.flux.file.delete(path)
       const { currentFile } = get()
       if (currentFile?.path === path) {
         set({ currentFile: null, currentContent: '', currentMtime: null })
@@ -187,7 +187,7 @@ export const useFileStore = create<FileState>((set, get) => ({
     parts[parts.length - 1] = newName
     const newPath = parts.join('/')
     try {
-      await window.painote.file.rename(oldPath, newPath)
+      await window.flux.file.rename(oldPath, newPath)
     } catch (err) {
       console.error('Failed to rename file:', err)
       throw err
@@ -196,7 +196,7 @@ export const useFileStore = create<FileState>((set, get) => ({
 
   moveFile: async (sourcePath, targetDir) => {
     try {
-      await window.painote.file.move(sourcePath, targetDir)
+      await window.flux.file.move(sourcePath, targetDir)
     } catch (err) {
       console.error('Failed to move file:', err)
       throw err
@@ -205,11 +205,11 @@ export const useFileStore = create<FileState>((set, get) => ({
 
   openFolder: async () => {
     try {
-      const result = await window.painote.dialog.openDirectory({ title: 'Open Folder' })
+      const result = await window.flux.dialog.openDirectory({ title: 'Open Folder' })
       if (!result) return
       const folderPath = Array.isArray(result) ? result[0] : result
       if (!folderPath) return
-      await window.painote.settings.set({ workspacePath: folderPath })
+      await window.flux.settings.set({ workspacePath: folderPath })
       set({
         workspacePath: folderPath,
         currentFile: null,

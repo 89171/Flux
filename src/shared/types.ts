@@ -1,5 +1,5 @@
 /**
- * PaiNote Shared Types
+ * Flux Shared Types
  */
 
 // ============ Note & File Types ============
@@ -286,7 +286,7 @@ export interface AIConversation {
 export interface AppSettings {
   workspacePath: string
   ai: {
-    provider: 'openai' | 'anthropic' | 'local' | 'none'
+    provider: 'openai' | 'anthropic' | 'deepseek' | 'kimi' | 'minimax' | 'glm' | 'local' | 'none'
     apiKey: string
     model: string
     baseUrl: string
@@ -299,4 +299,25 @@ export interface AppSettings {
    * every time the user toggles from the market UI.
    */
   pluginState?: Record<string, { enabled: boolean }>
+}
+
+// ============ Update Check Types ============
+
+export interface UpdateCheckResult {
+  hasUpdate: boolean
+  currentVersion: string
+  latestVersion: string
+  releaseUrl: string
+  releaseNotes: string
+}
+
+// ============ Search Types ============
+
+export interface SearchResult {
+  path: string
+  name: string
+  line: number
+  lineText: string
+  matchStart: number
+  matchEnd: number
 }

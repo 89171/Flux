@@ -1,4 +1,4 @@
-# PaiNote
+# Flux
 
 > 插件化、桌面置顶、AI 生成的 Electron 笔记本应用。
 
@@ -16,7 +16,7 @@ npm run typecheck
 ## 功能路线
 
 1. ✅ 架构与目录结构
-2. ✅ 插件系统骨架 + SDK（@painote/plugin-sdk）
+2. ✅ 插件系统骨架 + SDK（@flux/plugin-sdk）
 3. ⏳ Markdown 内置插件
 4. ⏳ 窗口置顶功能
 5. ⏳ AI 生成模块
@@ -24,10 +24,10 @@ npm run typecheck
 
 ## 插件开发
 
-插件依赖 `@painote/plugin-sdk`，通过 `definePlugin` 封装后默认导出：
+插件依赖 `@flux/plugin-sdk`，通过 `definePlugin` 封装后默认导出：
 
 ```ts
-import { definePlugin } from '@painote/plugin-sdk'
+import { definePlugin } from '@flux/plugin-sdk'
 
 export default definePlugin({
   manifest: { id: 'myformat', format: 'myformat', displayName: 'My Format', ... },

@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, Menu, shell } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { FileSystemManager } from './FileSystemManager'
 import { PluginManager } from './PluginManager'
@@ -7,6 +7,7 @@ import { WindowManager } from './WindowManager'
 import { AIService } from './AIService'
 import { registerIPC } from './ipc'
 import { getSettings, isPluginEnabled } from './SettingsStore'
+import { IPC } from '@shared/ipc-channels'
 
 let windowManager: WindowManager
 let pluginManager: PluginManager
@@ -72,6 +73,187 @@ async function bootstrap(): Promise<void> {
   }
 }
 
+/**
+ * Forward a menu action to the focused window's renderer so it can be
+ * handled by the React layer (open a palette, toggle theme, etc.).
+ */
+function sendMenuAction(action: string): void {
+  BrowserWindow.getFocusedWindow()?.webContents.send(IPC.MENU_ACTION_EVENT, action)
+}
+
+/**
+ * Build and install the application menu bar. Menu items that map to
+ * renderer-side actions forward via `IPC.MENU_ACTION_EVENT`; standard
+ * Electron roles (quit, undo, cut, …) are handled natively.
+ */
+function buildMenu(): void {
+  const isDev = is.dev
+
+  const viewSubmenu: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: 'Zoom In',
+      accelerator: 'CmdOrControl+=',
+      click: () => sendMenuAction('zoom-in')
+    },
+    {
+      label: 'Zoom Out',
+      accelerator: 'CmdOrControl+-',
+      click: () => sendMenuAction('zoom-out')
+    },
+    {
+      label: 'Reset Zoom',
+      accelerator: 'CmdOrControl+0',
+      click: () => sendMenuAction('zoom-reset')
+    },
+    { type: 'separator' },
+    {
+      label: 'Toggle Theme',
+      accelerator: 'CmdOrControl+Shift+T',
+      click: () => sendMenuAction('toggle-theme')
+    },
+    { type: 'separator' }
+  ]
+  if (isDev) {
+    viewSubmenu.push({ role: 'reload', accelerator: 'CmdOrControl+R' })
+    viewSubmenu.push({ role: 'toggleDevTools', accelerator: 'F12' })
+  }
+
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: 'Flux',
+      submenu: [
+        {
+          label: 'About Flux',
+          click: () => sendMenuAction('about')
+        },
+        { type: 'separator' },
+        {
+          label: 'Preferences...',
+          accelerator: 'CmdOrControl+,',
+          click: () => sendMenuAction('settings')
+        },
+        { type: 'separator' },
+        { role: 'quit', label: 'Quit Flux', accelerator: 'CmdOrControl+Q' }
+      ]
+    },
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'New File',
+          accelerator: 'CmdOrControl+N',
+          click: () => sendMenuAction('new-file')
+        },
+        {
+          label: 'Open Folder',
+          accelerator: 'CmdOrControl+O',
+          click: () => sendMenuAction('open-folder')
+        },
+        {
+          label: 'Save',
+          accelerator: 'CmdOrControl+S',
+          click: () => sendMenuAction('save')
+        },
+        { type: 'separator' },
+        { role: 'close', label: 'Close Window', accelerator: 'CmdOrControl+W' }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo', accelerator: 'CmdOrControl+Z' },
+        { role: 'redo', accelerator: 'CmdOrControl+Shift+Z' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll', label: 'Select All' },
+        { type: 'separator' },
+        {
+          label: 'Find',
+          accelerator: 'CmdOrControl+F',
+          click: () => sendMenuAction('find')
+        },
+        {
+          label: 'Replace',
+          accelerator: 'CmdOrControl+H',
+          click: () => sendMenuAction('replace')
+        }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: viewSubmenu
+    },
+    {
+      label: 'Go',
+      submenu: [
+        {
+          label: 'Quick Open',
+          accelerator: 'CmdOrControl+P',
+          click: () => sendMenuAction('quick-open')
+        },
+        {
+          label: 'Global Search',
+          accelerator: 'CmdOrControl+Shift+F',
+          click: () => sendMenuAction('global-search')
+        },
+        {
+          label: 'Command Palette',
+          accelerator: 'CmdOrControl+Shift+P',
+          click: () => sendMenuAction('command-palette')
+        }
+      ]
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize', accelerator: 'CmdOrControl+M' },
+        { role: 'zoom' },
+        { type: 'separator' },
+        { role: 'front', label: 'Bring All to Front' }
+      ]
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'About Flux',
+          click: () => sendMenuAction('about')
+        },
+        {
+          label: 'Check for Updates...',
+          click: () => sendMenuAction('check-for-updates')
+        },
+        { type: 'separator' },
+        {
+          label: 'Toggle Developer Tools',
+          accelerator: 'CmdOrControl+Shift+I',
+          click: () => {
+            BrowserWindow.getFocusedWindow()?.webContents.toggleDevTools()
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'GitHub Repository',
+          click: () => {
+            shell.openExternal('https://github.com/jianmin-zhu/Flux')
+          }
+        }
+      ]
+    }
+  ]
+
+  const menu = Menu.buildFromTemplate(template)
+  Menu.setApplicationMenu(menu)
+}
+
+// In dev, the running binary is node_modules/electron/dist/Electron.app,
+// so macOS shows "Electron" in the menu bar / About / force-quit dialog
+// unless we override the app name explicitly. Must be set before
+// whenReady so the value is in place when the native menu is built.
+app.setName('Flux')
+
 // Request single instance lock
 const gotTheLock = app.requestSingleInstanceLock()
 
@@ -100,7 +282,7 @@ if (!gotTheLock) {
 
   app.whenReady().then(() => {
     // Set app user model id for Windows
-    electronApp.setAppUserModelId('com.painote.app')
+    electronApp.setAppUserModelId('com.flux.app')
 
     // Default open or close DevTools by F12 in development
     // and ignore CommandOrControl + R in production
@@ -108,9 +290,13 @@ if (!gotTheLock) {
       optimizer.watchWindowShortcuts(window)
     })
 
-    bootstrap().catch((err) => {
-      console.error('Failed to bootstrap application:', err)
-    })
+    bootstrap()
+      .then(() => {
+        buildMenu()
+      })
+      .catch((err) => {
+        console.error('Failed to bootstrap application:', err)
+      })
   })
 }
 

@@ -2,7 +2,7 @@
   "id": "mermaid",
   "name": "Mermaid",
   "version": "1.0.0",
-  "author": "PaiNote",
+  "author": "Flux",
   "description": "Text-driven diagrams (flowchart, sequence, class, state, ER, gantt, journey, ...). Bundled but not installed by default — enable from the market.",
   "type": "format",
   "extensions": ["mmd"],

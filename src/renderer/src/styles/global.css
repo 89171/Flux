@@ -1,5 +1,5 @@
 /**
- * PaiNote Global Styles
+ * Flux Global Styles
  * Black & White minimal aesthetic inspired by Notion & Typora
  */
 
@@ -57,6 +57,67 @@
 
   --transition-fast: 0.1s ease;
   --transition-base: 0.2s ease;
+}
+
+/* ============ Dark Theme ============ */
+[data-theme="dark"] {
+  --bg-primary: #1a1a1a;
+  --bg-secondary: #222222;
+  --bg-tertiary: #2a2a2a;
+  --bg-hover: #333333;
+  --bg-active: #3a3a3a;
+  --bg-selected: #404040;
+
+  --text-primary: #e0e0e0;
+  --text-secondary: #a0a0a0;
+  --text-tertiary: #707070;
+  --text-disabled: #505050;
+
+  --border-color: #3a3a3a;
+  --border-light: #2a2a2a;
+
+  --accent: #e0e0e0;
+  --accent-hover: #ffffff;
+  --accent-light: #2a2a2a;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-track { background: transparent; }
+[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 4px; }
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: #4a4a4a; }
+
+/* Auto-detection fallback (respects system preference unless data-theme="light" is set) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg-primary: #1a1a1a;
+    --bg-secondary: #222222;
+    --bg-tertiary: #2a2a2a;
+    --bg-hover: #333333;
+    --bg-active: #3a3a3a;
+    --bg-selected: #404040;
+
+    --text-primary: #e0e0e0;
+    --text-secondary: #a0a0a0;
+    --text-tertiary: #707070;
+    --text-disabled: #505050;
+
+    --border-color: #3a3a3a;
+    --border-light: #2a2a2a;
+
+    --accent: #e0e0e0;
+    --accent-hover: #ffffff;
+    --accent-light: #2a2a2a;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.5);
+  }
+  :root:not([data-theme="light"]) ::-webkit-scrollbar-track { background: transparent; }
+  :root:not([data-theme="light"]) ::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 4px; }
+  :root:not([data-theme="light"]) ::-webkit-scrollbar-thumb:hover { background: #4a4a4a; }
 }
 
 html, body, #root {

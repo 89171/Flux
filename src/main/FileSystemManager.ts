@@ -12,7 +12,7 @@ import {
   realpathSync
 } from 'fs'
 import chokidar, { type FSWatcher } from 'chokidar'
-import type { NoteFile, NoteFormat } from '@shared/types'
+import type { NoteFile, NoteFormat, SearchResult } from '@shared/types'
 
 /**
  * Callback that maps a file path to a renderer id. Injected from the
@@ -400,6 +400,75 @@ export class FileSystemManager {
     })
 
     return files
+  }
+
+  /**
+   * Walk the workspace recursively and search file contents for `query`
+   * (case-insensitive). Returns one entry per match, capped at
+   * `maxResults`. Dotfiles, node_modules and binary files are skipped.
+   */
+  searchFiles(query: string, maxResults: number = 200): SearchResult[] {
+    if (!query) return []
+    const results: SearchResult[] = []
+    const lowerQuery = query.toLowerCase()
+    this.walkAndSearch('', lowerQuery, maxResults, results)
+    return results
+  }
+
+  private walkAndSearch(
+    relativeDir: string,
+    lowerQuery: string,
+    maxResults: number,
+    results: SearchResult[]
+  ): void {
+    if (results.length >= maxResults) return
+    const fullPath = relativeDir ? this.resolvePath(relativeDir) : this.workspacePath
+    if (!existsSync(fullPath)) return
+
+    const entries = readdirSync(fullPath, { withFileTypes: true })
+    for (const entry of entries) {
+      if (results.length >= maxResults) return
+      // Reuse buildTree's filtering: skip dotfiles and node_modules
+      if (entry.name.startsWith('.')) continue
+      if (entry.name === 'node_modules') continue
+
+      const entryRelPath = relativeDir ? join(relativeDir, entry.name) : entry.name
+      const entryFullPath = join(fullPath, entry.name)
+
+      if (entry.isDirectory()) {
+        this.walkAndSearch(entryRelPath, lowerQuery, maxResults, results)
+      } else {
+        let content: string
+        try {
+          content = readFileSync(entryFullPath, 'utf-8')
+        } catch {
+          // Skip files that fail to read as text
+          continue
+        }
+        // Skip binary files (null byte heuristic)
+        if (content.includes('\0')) continue
+
+        const lines = content.split('\n')
+        for (let i = 0; i < lines.length; i++) {
+          if (results.length >= maxResults) return
+          const lineText = lines[i]
+          const lowerLine = lineText.toLowerCase()
+          let idx = lowerLine.indexOf(lowerQuery)
+          while (idx !== -1) {
+            if (results.length >= maxResults) return
+            results.push({
+              path: entryRelPath,
+              name: entry.name,
+              line: i + 1,
+              lineText,
+              matchStart: idx,
+              matchEnd: idx + lowerQuery.length
+            })
+            idx = lowerLine.indexOf(lowerQuery, idx + 1)
+          }
+        }
+      }
+    }
   }
 
   exists(relativePath: string): boolean {

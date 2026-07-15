@@ -2,7 +2,7 @@
   "id": "bpmn",
   "name": "BPMN",
   "version": "1.0.0",
-  "author": "PaiNote",
+  "author": "Flux",
   "description": "BPMN 2.0 process diagram viewer/editor (bpmn-js). Bundled but not installed by default — enable from the market.",
   "type": "format",
   "extensions": ["bpmn"],

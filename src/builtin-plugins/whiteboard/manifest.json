@@ -2,7 +2,7 @@
   "id": "whiteboard",
   "name": "Whiteboard",
   "version": "1.0.0",
-  "author": "PaiNote",
+  "author": "Flux",
   "description": "Built-in whiteboard for freeform drawing, sticky notes, and quick sketches — powered by tldraw.",
   "type": "format",
   "extensions": ["tldr"],

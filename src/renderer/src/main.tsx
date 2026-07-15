@@ -1,5 +1,5 @@
 /**
- * PaiNote Main Window Entry
+ * Flux Main Window Entry
  */
 
 import React from 'react'

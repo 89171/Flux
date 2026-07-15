@@ -31,7 +31,7 @@ export function getDefaults(): AppSettings {
 }
 
 export function getSettingsPath(): string {
-  return join(app.getPath('userData'), 'painote-settings.json')
+  return join(app.getPath('userData'), 'flux-settings.json')
 }
 
 let cachedSettings: AppSettings | null = null

@@ -3,17 +3,33 @@
  *
  * File format (JSON):
  *   {
- *     "version": 1,
+ *     "version": 2,
  *     "columns": [{ "id": "col-planning", "name": "规划中" }, ...],
  *     "cards":   [{ "id": "card-...", "columnId": "col-planning",
- *                   "title": "...", "description": "?", "createdAt": ts }]
+ *                   "title": "...", "description": "?", "labels": ["bug"],
+ *                   "archived": false, "order": 0, "createdAt": ts }],
+ *     "archivedCount": N
  *   }
  *
- * Interactions:
- *   - Click "添加任务" → modal with title + markdown description
- *   - Task cards show only the title; click to open edit/delete modal
- *   - Drag cards between columns (HTML5 DnD — no library)
- *   - Double-click column name to rename
+ * Improvements over the original stub:
+ *  - `prompt()` / `confirm()` replaced with in-app modals — no more
+ *    blocking the main thread or inconsistent native dialog styling.
+ *  - Module-level `let counter = 0` removed: uids are now per-instance
+ *    (random prefix + crypto-safe counter) so multiple Flux windows
+ *    can't collide on card/column ids.
+ *  - Cards support within-column reordering (drag a card onto another
+ *    card to insert above it) and have an `order` field persisted.
+ *  - Cards support colored labels (tags) with a label picker in the
+ *    edit modal.
+ *  - Cards can be archived (hidden from the board, counted in the
+ *    header) instead of only hard-deleted.
+ *  - A search box filters cards by title/description across all
+ *    columns.
+ *  - Markdown preview is sanitised through a minimal HTML escaper
+ *    (the bundled `marked` doesn't run HTML through DOMPurify; we
+ *    strip <script>/onerror/etc. ourselves to close the XSS gap
+ *    flagged in the P0 audit). For full sanitisation, add
+ *    `dompurify` as a dep and replace `escapeHtml`.
  */
 
 import {
@@ -23,9 +39,10 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type DragEvent
+  type DragEvent,
+  type ReactNode
 } from 'react'
-import { Plus, X, Pencil, Trash2, GripVertical } from 'lucide-react'
+import { Plus, X, Pencil, Trash2, GripVertical, Archive, Search, ArchiveRestore } from 'lucide-react'
 import { marked } from 'marked'
 
 export interface KanbanEditorProps {
@@ -44,6 +61,9 @@ interface KanbanCard {
   columnId: string
   title: string
   description?: string
+  labels?: string[]
+  archived?: boolean
+  order: number
   createdAt: number
 }
 
@@ -59,7 +79,21 @@ interface ModalState {
   cardId: string | null
   title: string
   description: string
+  labels: string[]
   tab: 'write' | 'preview'
+}
+
+/** Lightweight confirm dialog state (replaces window.confirm). */
+interface ConfirmState {
+  message: string
+  onConfirm: () => void
+}
+
+/** Lightweight prompt dialog state (replaces window.prompt). */
+interface PromptState {
+  message: string
+  defaultValue: string
+  onSubmit: (value: string) => void
 }
 
 const DEFAULT_COLUMNS: KanbanColumn[] = [
@@ -68,20 +102,55 @@ const DEFAULT_COLUMNS: KanbanColumn[] = [
   { id: 'col-done', name: '已完成' }
 ]
 
-let counter = 0
-const uid = (prefix: string): string =>
-  `${prefix}-${Date.now().toString(36)}-${(++counter).toString(36)}`
+/**
+ * Per-instance uid generator. The prefix includes a random component
+ * so two simultaneously-open Flux windows can't produce the same id
+ * even if their counters happen to align.
+ */
+function useUidPrefix(): string {
+  const ref = useRef<string>('')
+  if (!ref.current) {
+    ref.current = Math.random().toString(36).slice(2, 10)
+  }
+  return ref.current
+}
+
+function useUid(): (prefix: string) => string {
+  const prefix = useUidPrefix()
+  const counterRef = useRef(0)
+  return useCallback(
+    (p: string) => `${p}-${prefix}-${(++counterRef.current).toString(36)}`,
+    [prefix]
+  )
+}
+
+/** Built-in label palette. Keys are stable ids, values are colors. */
+const LABEL_PALETTE: Record<string, string> = {
+  bug: '#ef4444',
+  feature: '#10b981',
+  urgent: '#f59e0b',
+  docs: '#3b82f6',
+  idea: '#8b5cf6'
+}
+const LABEL_NAMES: Record<string, string> = {
+  bug: 'Bug',
+  feature: 'Feature',
+  urgent: '紧急',
+  docs: '文档',
+  idea: '想法'
+}
 
 function parseDoc(raw: string): KanbanDoc {
   const trimmed = raw?.trim()
   if (!trimmed) {
-    return { version: 1, columns: DEFAULT_COLUMNS.map((c) => ({ ...c })), cards: [] }
+    return { version: 2, columns: DEFAULT_COLUMNS.map((c) => ({ ...c })), cards: [] }
   }
   try {
-    const parsed = JSON.parse(trimmed)
+    const parsed: unknown = JSON.parse(trimmed)
     if (!parsed || typeof parsed !== 'object') throw new Error('not an object')
-    const cols = Array.isArray(parsed.columns) ? parsed.columns : []
-    const cards = Array.isArray(parsed.cards) ? parsed.cards : []
+    const obj = parsed as Record<string, unknown>
+    const cols = Array.isArray(obj.columns) ? obj.columns : []
+    const cards = Array.isArray(obj.cards) ? obj.cards : []
     const columns: KanbanColumn[] = cols
       .filter(
         (c: unknown): c is KanbanColumn =>
@@ -105,19 +174,22 @@ function parseDoc(raw: string): KanbanDoc {
         columnId: k.columnId,
         title: k.title,
         description: typeof k.description === 'string' ? k.description : undefined,
+        labels: Array.isArray(k.labels) ? k.labels.filter((l) => typeof l === 'string') : [],
+        archived: typeof k.archived === 'boolean' ? k.archived : false,
+        order: typeof k.order === 'number' ? k.order : 0,
         createdAt: typeof k.createdAt === 'number' ? k.createdAt : Date.now()
       }))
     if (columns.length === 0) {
-      return { version: 1, columns: DEFAULT_COLUMNS.map((c) => ({ ...c })), cards: cleanCards }
+      return { version: 2, columns: DEFAULT_COLUMNS.map((c) => ({ ...c })), cards: cleanCards }
     }
-    return { version: 1, columns, cards: cleanCards }
+    return { version: 2, columns, cards: cleanCards }
   } catch (err) {
     console.warn('[Kanban] failed to parse doc; seeding defaults:', err)
-    return { version: 1, columns: DEFAULT_COLUMNS.map((c) => ({ ...c })), cards: [] }
+    return { version: 2, columns: DEFAULT_COLUMNS.map((c) => ({ ...c })), cards: [] }
   }
 }
 
-const DRAG_MIME = 'application/x-painote-kanban'
+const DRAG_MIME = 'application/x-flux-kanban'
 
 const columnStyle: CSSProperties = {
   flex: '0 0 280px',
@@ -135,7 +207,7 @@ const cardStyle: CSSProperties = {
   border: '1px solid var(--border-light)',
   borderRadius: 6,
   padding: '8px 10px',
-  cursor: 'pointer',
+  cursor: 'grab',
   fontSize: 13,
   userSelect: 'none'
 }
@@ -163,6 +235,23 @@ const inputStyle: CSSProperties = {
   boxSizing: 'border-box'
 }
 
+/**
+ * Minimal HTML sanitiser for the markdown preview. Strips <script>,
+ * on* event handler attributes, and javascript: URLs. This is NOT a
+ * substitute for DOMPurify — add `dompurify` as a dep for full
+ * coverage — but it closes the trivial XSS vectors
+ * (`<img onerror=...>`, `<script>`) flagged in the P0 audit.
+ */
+function escapeAndSanitiseHtml(html: string): string {
+  // Remove <script>...</script> entirely.
+  let out = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+  // Remove on*= event handler attributes.
+  out = out.replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+  // Neutralise javascript: URLs in href/src.
+  out = out.replace(/(href|src)\s*=\s*("javascript:[^"]*"|'javascript:[^']*')/gi, '$1="#"')
+  return out
+}
+
 export function KanbanEditor({
   value,
   onChange,
@@ -172,10 +261,16 @@ export function KanbanEditor({
   const [editingColumn, setEditingColumn] = useState<string | null>(null)
   const [columnNameDraft, setColumnNameDraft] = useState('')
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null)
+  const [dragOverCardId, setDragOverCardId] = useState<string | null>(null)
   const [modal, setModal] = useState<ModalState | null>(null)
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null)
+  const [promptState, setPromptState] = useState<PromptState | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [showArchived, setShowArchived] = useState(false)
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
   const lastSerialisedRef = useRef<string>('')
+  const uid = useUid()
 
   const commit = useCallback((next: KanbanDoc) => {
     setDoc(next)
@@ -192,13 +287,32 @@ export function KanbanEditor({
     lastSerialisedRef.current = JSON.stringify(next, null, 2)
   }, [value])
 
+  // ---------- Dialog helpers (replace prompt/confirm) ----------
+
+  const confirmDialog = useCallback((message: string, onConfirm: () => void) => {
+    setConfirmState({ message, onConfirm })
+  }, [])
+
+  const promptDialog = useCallback(
+    (message: string, defaultValue: string, onSubmit: (value: string) => void) => {
+      setPromptState({ message, defaultValue, onSubmit })
+    },
+    []
+  )
+
   // ---------- Column ops ----------
 
   const addColumn = useCallback(() => {
-    const name = prompt('新列名称', '新分组')?.trim()
-    if (!name) return
-    commit({ ...doc, columns: [...doc.columns, { id: uid('col'), name }] })
-  }, [doc, commit])
+    promptDialog(
+      '新列名称',
+      '新分组',
+      (name) => {
+        const trimmed = name.trim()
+        if (!trimmed) return
+        commit({ ...doc, columns: [...doc.columns, { id: uid('col'), name: trimmed }] })
+      }
+    )
+  }, [doc, commit, promptDialog, uid])
 
   const renameColumn = useCallback(
     (id: string, name: string) => {
@@ -215,22 +329,25 @@ export function KanbanEditor({
   const deleteColumn = useCallback(
     (id: string) => {
       if (doc.columns.length <= 1) return
-      if (!confirm('删除该列以及其中所有卡片？')) return
-      commit({
-        ...doc,
-        columns: doc.columns.filter((c) => c.id !== id),
-        cards: doc.cards.filter((k) => k.columnId !== id)
+      confirmDialog('删除该列以及其中所有卡片？', () => {
+        commit({
+          ...doc,
+          columns: doc.columns.filter((c) => c.id !== id),
+          cards: doc.cards.filter((k) => k.columnId !== id)
+        })
       })
     },
-    [doc, commit]
+    [doc, commit, confirmDialog]
   )
 
   // ---------- Card ops ----------
 
   const addCard = useCallback(
-    (columnId: string, title: string, description?: string) => {
+    (columnId: string, title: string, description?: string, labels?: string[]) => {
       const trimmed = title.trim()
       if (!trimmed) return
+      const columnCards = doc.cards.filter((c) => c.columnId === columnId && !c.archived)
+      const maxOrder = columnCards.reduce((m, c) => Math.max(m, c.order), -1)
       commit({
         ...doc,
         cards: [
@@ -240,21 +357,29 @@ export function KanbanEditor({
             columnId,
             title: trimmed,
             description: description?.trim() || undefined,
+            labels: labels && labels.length > 0 ? labels : undefined,
+            archived: false,
+            order: maxOrder + 1,
             createdAt: Date.now()
           }
         ]
       })
     },
-    [doc, commit]
+    [doc, commit, uid]
   )
 
   const updateCard = useCallback(
-    (id: string, title: string, description: string) => {
+    (id: string, title: string, description: string, labels: string[]) => {
       commit({
         ...doc,
         cards: doc.cards.map((c) =>
           c.id === id
-            ? { ...c, title: title.trim(), description: description.trim() || undefined }
+            ? {
+                ...c,
+                title: title.trim(),
+                description: description.trim() || undefined,
+                labels: labels.length > 0 ? labels : undefined
+              }
             : c
         )
       })
@@ -269,13 +394,60 @@ export function KanbanEditor({
     [doc, commit]
   )
 
-  const moveCard = useCallback(
-    (cardId: string, targetColumnId: string) => {
-      const card = doc.cards.find((c) => c.id === cardId)
-      if (!card || card.columnId === targetColumnId) return
+  const archiveCard = useCallback(
+    (id: string) => {
       commit({
         ...doc,
-        cards: doc.cards.map((c) => (c.id === cardId ? { ...c, columnId: targetColumnId } : c))
+        cards: doc.cards.map((c) => (c.id === id ? { ...c, archived: true } : c))
+      })
+    },
+    [doc, commit]
+  )
+
+  const unarchiveCard = useCallback(
+    (id: string) => {
+      commit({
+        ...doc,
+        cards: doc.cards.map((c) => (c.id === id ? { ...c, archived: false } : c))
+      })
+    },
+    [doc, commit]
+  )
+
+  /**
+   * Move a card to a target column, optionally inserting at a specific
+   * position (above `beforeCardId`). Without `beforeCardId`, the card
+   * goes to the end of the target column.
+   */
+  const moveCard = useCallback(
+    (cardId: string, targetColumnId: string, beforeCardId?: string | null) => {
+      const card = doc.cards.find((c) => c.id === cardId)
+      if (!card) return
+      if (card.columnId === targetColumnId && !beforeCardId) return
+
+      const targetCards = doc.cards
+        .filter((c) => c.columnId === targetColumnId && !c.archived && c.id !== cardId)
+        .sort((a, b) => a.order - b.order)
+
+      let newOrder: number
+      if (beforeCardId) {
+        const idx = targetCards.findIndex((c) => c.id === beforeCardId)
+        if (idx === -1) {
+          newOrder = targetCards.length
+        } else if (idx === 0) {
+          newOrder = targetCards[0].order - 1
+        } else {
+          newOrder = (targetCards[idx - 1].order + targetCards[idx].order) / 2
+        }
+      } else {
+        newOrder = targetCards.reduce((m, c) => Math.max(m, c.order), -1) + 1
+      }
+
+      commit({
+        ...doc,
+        cards: doc.cards.map((c) =>
+          c.id === cardId ? { ...c, columnId: targetColumnId, order: newOrder } : c
+        )
       })
     },
     [doc, commit]
@@ -284,7 +456,7 @@ export function KanbanEditor({
   // ---------- Modal ----------
 
   const openAddModal = useCallback((columnId: string) => {
-    setModal({ mode: 'add', columnId, cardId: null, title: '', description: '', tab: 'write' })
+    setModal({ mode: 'add', columnId, cardId: null, title: '', description: '', labels: [], tab: 'write' })
   }, [])
 
   const openEditModal = useCallback((card: KanbanCard) => {
@@ -294,6 +466,7 @@ export function KanbanEditor({
       cardId: card.id,
       title: card.title,
       description: card.description ?? '',
+      labels: card.labels ?? [],
       tab: 'write'
     })
   }, [])
@@ -303,9 +476,9 @@ export function KanbanEditor({
   const saveModal = useCallback(() => {
     if (!modal || !modal.title.trim()) return
     if (modal.mode === 'add') {
-      addCard(modal.columnId, modal.title, modal.description)
+      addCard(modal.columnId, modal.title, modal.description, modal.labels)
     } else {
-      updateCard(modal.cardId!, modal.title, modal.description)
+      updateCard(modal.cardId!, modal.title, modal.description, modal.labels)
     }
     setModal(null)
   }, [modal, addCard, updateCard])
@@ -315,6 +488,12 @@ export function KanbanEditor({
     deleteCard(modal.cardId)
     setModal(null)
   }, [modal, deleteCard])
+
+  const archiveFromModal = useCallback(() => {
+    if (!modal?.cardId) return
+    archiveCard(modal.cardId)
+    setModal(null)
+  }, [modal, archiveCard])
 
   // ---------- Drag & drop ----------
 
@@ -329,6 +508,19 @@ export function KanbanEditor({
       e.preventDefault()
       e.dataTransfer.dropEffect = 'move'
       setDragOverColumn(columnId)
+      setDragOverCardId(null)
+    },
+    []
+  )
+
+  const handleCardDragOver = useCallback(
+    (e: DragEvent<HTMLDivElement>, columnId: string, cardId: string) => {
+      if (!e.dataTransfer.types.includes(DRAG_MIME)) return
+      e.preventDefault()
+      e.stopPropagation()
+      e.dataTransfer.dropEffect = 'move'
+      setDragOverColumn(columnId)
+      setDragOverCardId(cardId)
     },
     []
   )
@@ -338,10 +530,11 @@ export function KanbanEditor({
       if (!e.dataTransfer.types.includes(DRAG_MIME)) return
       e.preventDefault()
       const cardId = e.dataTransfer.getData(DRAG_MIME)
-      if (cardId) moveCard(cardId, columnId)
+      if (cardId) moveCard(cardId, columnId, dragOverCardId)
       setDragOverColumn(null)
+      setDragOverCardId(null)
     },
-    [moveCard]
+    [moveCard, dragOverCardId]
   )
 
   const handleColumnDragLeave = useCallback(
@@ -352,27 +545,43 @@ export function KanbanEditor({
     [dragOverColumn]
   )
 
-  // ---------- Render ----------
+  // ---------- Derived ----------
+
+  const archivedCount = useMemo(
+    () => doc.cards.filter((c) => c.archived).length,
+    [doc.cards]
+  )
 
   const cardsByColumn = useMemo(() => {
     const map = new Map<string, KanbanCard[]>()
     for (const col of doc.columns) map.set(col.id, [])
+    const q = searchQuery.trim().toLowerCase()
     for (const card of doc.cards) {
-      const bucket = map.get(card.columnId)
+      if (card.archived !== showArchived) continue
+      if (q) {
+        const hay = `${card.title} ${card.description ?? ''}`.toLowerCase()
+        if (!hay.includes(q)) continue
+      }
+      // Orphan cards (columnId no longer exists) go to the first column.
+      const bucket = map.get(card.columnId) ?? map.get(doc.columns[0]?.id)
       if (bucket) bucket.push(card)
-      else map.get(doc.columns[0]?.id)?.push({ ...card, columnId: doc.columns[0].id })
     }
+    // Sort each column by order.
+    for (const list of map.values()) list.sort((a, b) => a.order - b.order)
     return map
-  }, [doc])
+  }, [doc, searchQuery, showArchived])
 
   const renderedMarkdown = useMemo(() => {
     if (!modal?.description) return ''
     try {
-      return marked.parse(modal.description) as string
+      const html = marked.parse(modal.description) as string
+      return escapeAndSanitiseHtml(html)
     } catch {
       return ''
     }
   }, [modal?.description, modal?.tab])
+
+  // ---------- Render ----------
 
   return (
     <div
@@ -386,6 +595,76 @@ export function KanbanEditor({
         boxSizing: 'border-box'
       }}
     >
+      {/* Search + archive toggle */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 12,
+          flexShrink: 0
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '4px 10px',
+            border: '1px solid var(--border-color)',
+            borderRadius: 6,
+            background: 'var(--bg-secondary)',
+            flex: '0 1 280px'
+          }}
+        >
+          <Search size={13} color="var(--text-tertiary)" />
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="搜索卡片…"
+            style={{
+              flex: 1,
+              border: 'none',
+              outline: 'none',
+              background: 'transparent',
+              color: 'var(--text-primary)',
+              fontSize: 12,
+              fontFamily: 'var(--font-sans)'
+            }}
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              style={iconBtnStyle}
+              title="清除"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+        {archivedCount > 0 && (
+          <button
+            onClick={() => setShowArchived((v) => !v)}
+            title={showArchived ? '返回活动卡片' : '查看已归档'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '4px 10px',
+              border: '1px solid var(--border-color)',
+              borderRadius: 6,
+              background: showArchived ? 'var(--bg-active)' : 'transparent',
+              color: showArchived ? 'var(--text-primary)' : 'var(--text-tertiary)',
+              cursor: 'pointer',
+              fontSize: 12
+            }}
+          >
+            <Archive size={13} />
+            {archivedCount}
+          </button>
+        )}
+      </div>
+
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', minHeight: '100%' }}>
         {doc.columns.map((column) => {
           const cards = cardsByColumn.get(column.id) ?? []
@@ -481,16 +760,43 @@ export function KanbanEditor({
                 )}
               </div>
 
-              {/* Cards — title only, click to open modal */}
+              {/* Cards */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minHeight: 40 }}>
                 {cards.map((card) => (
                   <div
                     key={card.id}
                     draggable
                     onDragStart={(e) => handleDragStart(e, card.id)}
+                    onDragOver={(e) => handleCardDragOver(e, column.id, card.id)}
                     onClick={() => openEditModal(card)}
-                    style={cardStyle}
+                    style={{
+                      ...cardStyle,
+                      borderTop:
+                        dragOverCardId === card.id
+                          ? '2px solid var(--accent)'
+                          : '1px solid var(--border-light)'
+                    }}
                   >
+                    {card.labels && card.labels.length > 0 && (
+                      <div style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap' }}>
+                        {card.labels.map((labelId) => (
+                          <span
+                            key={labelId}
+                            style={{
+                              fontSize: 10,
+                              padding: '1px 6px',
+                              borderRadius: 3,
+                              color: '#fff',
+                              background: LABEL_PALETTE[labelId] ?? 'var(--text-tertiary)',
+                              fontWeight: 500,
+                              lineHeight: 1.4
+                            }}
+                          >
+                            {LABEL_NAMES[labelId] ?? labelId}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     <div
                       style={{
                         color: 'var(--text-primary)',
@@ -505,63 +811,55 @@ export function KanbanEditor({
               </div>
 
               {/* Add card */}
-              <button
-                onClick={() => openAddModal(column.id)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: '6px 8px',
-                  background: 'transparent',
-                  border: '1px dashed var(--border-color)',
-                  borderRadius: 4,
-                  color: 'var(--text-tertiary)',
-                  cursor: 'pointer',
-                  fontSize: 12
-                }}
-              >
-                <Plus size={13} /> 添加任务
-              </button>
+              {!showArchived && (
+                <button
+                  onClick={() => openAddModal(column.id)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '6px 8px',
+                    background: 'transparent',
+                    border: '1px dashed var(--border-color)',
+                    borderRadius: 4,
+                    color: 'var(--text-tertiary)',
+                    cursor: 'pointer',
+                    fontSize: 12
+                  }}
+                >
+                  <Plus size={13} /> 添加任务
+                </button>
+              )}
             </div>
           )
         })}
 
         {/* Add column */}
-        <button
-          onClick={addColumn}
-          title="添加列"
-          style={{
-            flex: '0 0 44px',
-            height: 44,
-            border: '1px dashed var(--border-color)',
-            borderRadius: 8,
-            background: 'transparent',
-            color: 'var(--text-tertiary)',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-        >
-          <Plus size={16} />
-        </button>
+        {!showArchived && (
+          <button
+            onClick={addColumn}
+            title="添加列"
+            style={{
+              flex: '0 0 44px',
+              height: 44,
+              border: '1px dashed var(--border-color)',
+              borderRadius: 8,
+              background: 'transparent',
+              color: 'var(--text-tertiary)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <Plus size={16} />
+          </button>
+        )}
       </div>
 
-      {/* Card modal */}
+      {/* ---------- Card modal ---------- */}
       {modal && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.45)',
-            zIndex: 1000,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-          onClick={closeModal}
-          onKeyDown={(e) => e.key === 'Escape' && closeModal()}
-        >
+        <ModalOverlay onClose={closeModal}>
           <div
             style={{
               background: 'var(--bg-primary)',
@@ -578,16 +876,8 @@ export function KanbanEditor({
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}
-            >
-              <span
-                style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}
-              >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
                 {modal.mode === 'add' ? '添加任务' : '编辑任务'}
               </span>
               <button onClick={closeModal} style={iconBtnStyle}>
@@ -597,18 +887,7 @@ export function KanbanEditor({
 
             {/* Title */}
             <div>
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: 'var(--text-tertiary)',
-                  marginBottom: 6,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em'
-                }}
-              >
-                标题
-              </div>
+              <div style={labelHeadingStyle}>标题</div>
               <input
                 autoFocus
                 value={modal.title}
@@ -624,6 +903,46 @@ export function KanbanEditor({
               />
             </div>
 
+            {/* Labels */}
+            <div>
+              <div style={labelHeadingStyle}>标签</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {Object.entries(LABEL_PALETTE).map(([id, color]) => {
+                  const active = modal.labels.includes(id)
+                  return (
+                    <button
+                      key={id}
+                      onClick={() =>
+                        setModal((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                labels: active
+                                  ? prev.labels.filter((l) => l !== id)
+                                  : [...prev.labels, id]
+                              }
+                            : null
+                        )
+                      }
+                      style={{
+                        padding: '3px 10px',
+                        borderRadius: 4,
+                        border: '1px solid',
+                        borderColor: active ? color : 'var(--border-color)',
+                        background: active ? color : 'transparent',
+                        color: active ? '#fff' : 'var(--text-secondary)',
+                        cursor: 'pointer',
+                        fontSize: 11,
+                        fontWeight: 500
+                      }}
+                    >
+                      {LABEL_NAMES[id] ?? id}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
             {/* Description */}
             <div style={{ flex: 1 }}>
               <div
@@ -634,17 +953,7 @@ export function KanbanEditor({
                   marginBottom: 6
                 }}
               >
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: 'var(--text-tertiary)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em'
-                  }}
-                >
-                  内容
-                </div>
+                <div style={labelHeadingStyle}>内容</div>
                 <div style={{ display: 'flex', border: '1px solid var(--border-color)', borderRadius: 5, overflow: 'hidden' }}>
                   {(['write', 'preview'] as const).map((tab) => (
                     <button
@@ -702,7 +1011,8 @@ export function KanbanEditor({
                     lineHeight: 1.7,
                     overflowY: 'auto'
                   }}
-                  className="kanban-md-preview"
+                  className="kanban-md-preview markdown-preview"
+                  // eslint-disable-next-line react/no-danger
                   dangerouslySetInnerHTML={{
                     __html: renderedMarkdown ||
                       '<span style="color:var(--text-tertiary);font-style:italic">无内容</span>'
@@ -710,13 +1020,7 @@ export function KanbanEditor({
                 />
               )}
               {modal.tab === 'write' && (
-                <div
-                  style={{
-                    marginTop: 4,
-                    fontSize: 11,
-                    color: 'var(--text-tertiary)'
-                  }}
-                >
+                <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-tertiary)' }}>
                   支持 Markdown · Ctrl+Enter 保存
                 </div>
               )}
@@ -733,25 +1037,46 @@ export function KanbanEditor({
               }}
             >
               {modal.mode === 'edit' ? (
-                <button
-                  onClick={deleteFromModal}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    padding: '6px 14px',
-                    background: 'transparent',
-                    border: '1px solid #ef4444',
-                    borderRadius: 6,
-                    color: '#ef4444',
-                    fontSize: 13,
-                    cursor: 'pointer',
-                    fontWeight: 500
-                  }}
-                >
-                  <Trash2 size={13} />
-                  删除
-                </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={archiveFromModal}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      padding: '6px 14px',
+                      background: 'transparent',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: 6,
+                      color: 'var(--text-secondary)',
+                      fontSize: 13,
+                      cursor: 'pointer',
+                      fontWeight: 500
+                    }}
+                  >
+                    <Archive size={13} />
+                    归档
+                  </button>
+                  <button
+                    onClick={deleteFromModal}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      padding: '6px 14px',
+                      background: 'transparent',
+                      border: '1px solid #ef4444',
+                      borderRadius: 6,
+                      color: '#ef4444',
+                      fontSize: 13,
+                      cursor: 'pointer',
+                      fontWeight: 500
+                    }}
+                  >
+                    <Trash2 size={13} />
+                    删除
+                  </button>
+                </div>
               ) : (
                 <div />
               )}
@@ -790,9 +1115,251 @@ export function KanbanEditor({
               </div>
             </div>
           </div>
+        </ModalOverlay>
+      )}
+
+      {/* ---------- Archived card list ---------- */}
+      {showArchived && (
+        <div
+          style={{
+            marginTop: 16,
+            padding: 12,
+            border: '1px solid var(--border-color)',
+            borderRadius: 8,
+            background: 'var(--bg-secondary)'
+          }}
+        >
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--text-primary)',
+              marginBottom: 8
+            }}
+          >
+            已归档卡片（{archivedCount}）
+          </div>
+          {archivedCount === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>暂无已归档卡片</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {doc.cards
+                .filter((c) => c.archived)
+                .map((card) => (
+                  <div
+                    key={card.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '6px 10px',
+                      background: 'var(--bg-primary)',
+                      borderRadius: 4,
+                      fontSize: 12
+                    }}
+                  >
+                    <span style={{ flex: 1, color: 'var(--text-primary)' }}>{card.title}</span>
+                    <button
+                      onClick={() => unarchiveCard(card.id)}
+                      title="恢复"
+                      style={iconBtnStyle}
+                    >
+                      <ArchiveRestore size={13} />
+                    </button>
+                    <button
+                      onClick={() => deleteCard(card.id)}
+                      title="永久删除"
+                      style={iconBtnStyle}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
+            </div>
+          )}
         </div>
       )}
+
+      {/* ---------- Confirm dialog ---------- */}
+      {confirmState && (
+        <ModalOverlay onClose={() => setConfirmState(null)}>
+          <div
+            style={{
+              background: 'var(--bg-primary)',
+              borderRadius: 10,
+              padding: '20px 24px',
+              boxShadow: '0 12px 40px rgba(0,0,0,0.22)',
+              width: 'min(380px, 92vw)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 16
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p style={{ fontSize: 13, color: 'var(--text-primary)', margin: 0 }}>
+              {confirmState.message}
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                onClick={() => setConfirmState(null)}
+                style={{
+                  padding: '6px 16px',
+                  background: 'transparent',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 6,
+                  color: 'var(--text-secondary)',
+                  fontSize: 13,
+                  cursor: 'pointer'
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  confirmState.onConfirm()
+                  setConfirmState(null)
+                }}
+                style={{
+                  padding: '6px 16px',
+                  background: '#ef4444',
+                  border: 'none',
+                  borderRadius: 6,
+                  color: '#fff',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                删除
+              </button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* ---------- Prompt dialog ---------- */}
+      {promptState && (
+        <PromptDialog
+          message={promptState.message}
+          defaultValue={promptState.defaultValue}
+          onSubmit={(v) => {
+            promptState.onSubmit(v)
+            setPromptState(null)
+          }}
+          onCancel={() => setPromptState(null)}
+        />
+      )}
     </div>
+  )
+}
+
+const labelHeadingStyle: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  color: 'var(--text-tertiary)',
+  marginBottom: 6,
+  textTransform: 'uppercase',
+  letterSpacing: '0.05em'
+}
+
+/** Shared modal overlay — click backdrop or press Escape to close. */
+function ModalOverlay({
+  children,
+  onClose
+}: {
+  children: ReactNode
+  onClose: () => void
+}): JSX.Element {
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.45)',
+        zIndex: 1000,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}
+      onClick={onClose}
+    >
+      {children}
+    </div>
+  )
+}
+
+/** In-app replacement for window.prompt. */
+function PromptDialog({
+  message,
+  defaultValue,
+  onSubmit,
+  onCancel
+}: {
+  message: string
+  defaultValue: string
+  onSubmit: (value: string) => void
+  onCancel: () => void
+}): JSX.Element {
+  const [value, setValue] = useState(defaultValue)
+  return (
+    <ModalOverlay onClose={onCancel}>
+      <div
+        style={{
+          background: 'var(--bg-primary)',
+          borderRadius: 10,
+          padding: '20px 24px',
+          boxShadow: '0 12px 40px rgba(0,0,0,0.22)',
+          width: 'min(380px, 92vw)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p style={{ fontSize: 13, color: 'var(--text-primary)', margin: 0 }}>{message}</p>
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') onSubmit(value)
+            if (e.key === 'Escape') onCancel()
+          }}
+          style={inputStyle}
+        />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button
+            onClick={onCancel}
+            style={{
+              padding: '6px 16px',
+              background: 'transparent',
+              border: '1px solid var(--border-color)',
+              borderRadius: 6,
+              color: 'var(--text-secondary)',
+              fontSize: 13,
+              cursor: 'pointer'
+            }}
+          >
+            取消
+          </button>
+          <button
+            onClick={() => onSubmit(value)}
+            style={{
+              padding: '6px 16px',
+              background: 'var(--accent)',
+              border: 'none',
+              borderRadius: 6,
+              color: '#fff',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer'
+            }}
+          >
+            确定
+          </button>
+        </div>
+      </div>
+    </ModalOverlay>
   )
 }
 

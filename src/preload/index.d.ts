@@ -1,8 +1,8 @@
-import type { PaiNoteAPI } from './index'
+import type { FluxAPI } from './index'
 
 declare global {
   interface Window {
-    painote: PaiNoteAPI
+    flux: FluxAPI
   }
 }
 

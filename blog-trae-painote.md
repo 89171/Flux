@@ -2,7 +2,7 @@
 
 ## 前言
 
-作为一名开发者，我一直在寻找能真正提升效率的AI编程工具。直到我遇见了Trae——字节跳动推出的AI IDE。今天我要分享一个真实的体验：**我只用了一个Prompt，就让Trae从零开始构建了一个完整的Electron桌面笔记应用——PaiNote。**
+作为一名开发者，我一直在寻找能真正提升效率的AI编程工具。直到我遇见了Trae——字节跳动推出的AI IDE。今天我要分享一个真实的体验：**我只用了一个Prompt，就让Trae从零开始构建了一个完整的Electron桌面笔记应用——Flux。**
 
 这不是一个玩具项目，而是一个具备插件系统、桌面置顶、AI生成等核心功能的完整应用。让我带你回顾整个过程。
 
@@ -12,7 +12,7 @@
 
 我给Trae的初始Prompt是这样的：
 
-> 帮我开发一款名为PaiNote的Electron桌面笔记本应用，核心需求如下：
+> 帮我开发一款名为Flux的Electron桌面笔记本应用，核心需求如下：
 > 1. 插件化格式系统
 > 2. 桌面置顶系统
 > 3. AI笔记生成
@@ -73,7 +73,7 @@ interface FormatPlugin {
 
 ### 第四步：窗口置顶系统
 
-这是PaiNote的特色功能。Trae实现了：
+这是Flux的特色功能。Trae实现了：
 
 - **always-on-top**：使用Electron的`screen-saver`级别置顶
 - **透明度调节**：30%~100%可调
@@ -252,4 +252,4 @@ Trae不仅仅是在"补全代码"，它真正在**理解需求、设计架构、
 
 ---
 
-*本文基于真实的Trae开发会话整理而成。PaiNote使用Electron + React + TypeScript构建，项目代码结构清晰，适合作为Electron应用的学习参考。*
+*本文基于真实的Trae开发会话整理而成。Flux使用Electron + React + TypeScript构建，项目代码结构清晰，适合作为Electron应用的学习参考。*

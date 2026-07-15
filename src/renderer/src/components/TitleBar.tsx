@@ -1,5 +1,5 @@
 /**
- * PaiNote Custom Title Bar (macOS traffic-light style)
+ * Flux Custom Title Bar (macOS traffic-light style)
  *
  * Uses the native macOS traffic-light buttons (red/yellow/green) via
  * `titleBarStyle: 'hidden'` in the main process. This bar provides a
@@ -54,7 +54,7 @@ export function TitleBar() {
             letterSpacing: 0.3,
           }}
         >
-          PaiNote
+          Flux
         </span>
       </div>
 

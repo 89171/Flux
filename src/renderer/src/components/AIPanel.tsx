@@ -1,5 +1,5 @@
 /**
- * PaiNote AI Panel
+ * Flux AI Panel
  *
  * AI-powered note generation panel with:
  * - Empty state with suggestion buttons
@@ -20,16 +20,18 @@ import {
   Image,
   Music,
   Check,
-  Trash2
+  Trash2,
+  Zap,
+  Square
 } from 'lucide-react'
 import { useAIStore } from '../stores/aiStore'
 import { useFileStore } from '../stores/fileStore'
 
 const suggestions = [
-  'Summarize this note',
-  'Generate meeting notes',
-  'Create a task list',
-  'Explain this concept'
+  'Summarize this document',
+  'Improve the writing',
+  'Create a flowchart from this content',
+  'Generate an outline'
 ]
 
 function getAttachmentIcon(type: string) {
@@ -47,8 +49,10 @@ export function AIPanel() {
   const messages = useAIStore((s) => s.messages)
   const isGenerating = useAIStore((s) => s.isGenerating)
   const error = useAIStore((s) => s.error)
+  const streamingContent = useAIStore((s) => s.streamingContent)
   const attachments = useAIStore((s) => s.attachments)
   const generate = useAIStore((s) => s.generate)
+  const cancelGenerate = useAIStore((s) => s.cancelGenerate)
   const addAttachment = useAIStore((s) => s.addAttachment)
   const clearAttachments = useAIStore((s) => s.clearAttachments)
   const clearMessages = useAIStore((s) => s.clearMessages)
@@ -58,6 +62,13 @@ export function AIPanel() {
   const setContent = useFileStore((s) => s.setContent)
 
   const [input, setInput] = useState('')
+  // When true, AI chunks stream directly into the note editor — the
+  // user sees text appear in the file in real time. When false, chunks
+  // only appear in the AI panel; Replace/Append applies them after.
+  const [streamToNote, setStreamToNote] = useState(false)
+  // Remembers the note's content at the start of streaming so append
+  // mode can prepend the original text.
+  const preStreamContentRef = useRef('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -75,12 +86,38 @@ export function AIPanel() {
     }
   }, [input])
 
+  // ─── Stream to Note ───
+  // When streamToNote is on and the AI is producing chunks, push each
+  // chunk into the file's content so the editor updates live. The
+  // MilkdownEditor's external-sync effect picks up the new value and
+  // calls replaceAll() — the user sees text appear word-by-word.
+  //
+  // Replace mode: setContent(streamingContent) — file becomes the
+  //   streaming AI output.
+  // Append mode: setContent(original + separator + streamingContent)
+  //   — AI text is appended below the original note content.
+  const streamModeRef = useRef<'replace' | 'append'>('replace')
+  useEffect(() => {
+    if (!streamToNote || !isGenerating || !streamingContent) return
+    if (streamModeRef.current === 'replace') {
+      setContent(streamingContent)
+    } else {
+      const existing = preStreamContentRef.current
+      const separator = existing ? '\n\n' : ''
+      setContent(existing + separator + streamingContent)
+    }
+  }, [streamToNote, isGenerating, streamingContent, setContent])
+
   const handleSend = useCallback(async () => {
     const prompt = input.trim()
     if (!prompt || isGenerating) return
 
     const format = currentFile?.format || 'markdown'
     const context = currentContent || undefined
+
+    // Snapshot the note content before streaming starts so append mode
+    // can prepend it later.
+    preStreamContentRef.current = currentContent || ''
 
     setInput('')
     await generate(prompt, format, context)
@@ -97,17 +134,21 @@ export function AIPanel() {
   )
 
   const handleApplyToNote = useCallback(
-    (content: string) => {
-      const existing = currentContent || ''
-      const separator = existing ? '\n\n' : ''
-      setContent(existing + separator + content)
+    (content: string, mode: 'append' | 'replace') => {
+      if (mode === 'replace') {
+        setContent(content)
+      } else {
+        const existing = currentContent || ''
+        const separator = existing ? '\n\n' : ''
+        setContent(existing + separator + content)
+      }
     },
     [currentContent, setContent]
   )
 
   const handleAttach = useCallback(async () => {
     try {
-      const filePath = await window.painote.dialog.openFile({
+      const filePath = await window.flux.dialog.openFile({
         title: 'Attach File',
         filters: [
           { name: 'All Files', extensions: ['*'] },
@@ -190,25 +231,54 @@ export function AIPanel() {
               <div className="role">{msg.role === 'user' ? 'You' : 'AI Assistant'}</div>
               <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</div>
               {msg.role === 'assistant' && (
-                <button
-                  className="btn btn-primary"
-                  style={{ marginTop: 8, fontSize: 'var(--font-size-xs)', padding: '3px 8px', gap: 4 }}
-                  onClick={() => handleApplyToNote(msg.content)}
-                >
-                  <Check size={12} /> Apply to note
-                </button>
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <button
+                    className="btn btn-primary"
+                    style={{ fontSize: 'var(--font-size-xs)', padding: '3px 8px', gap: 4 }}
+                    onClick={() => handleApplyToNote(msg.content, 'replace')}
+                    title="Replace current note content"
+                  >
+                    <Check size={12} /> Replace
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    style={{ fontSize: 'var(--font-size-xs)', padding: '3px 8px', gap: 4, border: '1px solid var(--border-color)' }}
+                    onClick={() => handleApplyToNote(msg.content, 'append')}
+                    title="Append to current note"
+                  >
+                    <Check size={12} /> Append
+                  </button>
+                </div>
               )}
             </div>
           ))}
 
-          {/* Loading state */}
+          {/* Loading / streaming state */}
           {isGenerating && (
             <div className="ai-message assistant">
               <div className="role">AI Assistant</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-tertiary)' }}>
-                <div className="spinner" />
-                <span>Generating...</span>
-              </div>
+              {streamingContent ? (
+                <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {streamingContent}
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      width: 6,
+                      height: 14,
+                      marginLeft: 2,
+                      background: 'var(--accent)',
+                      verticalAlign: 'text-bottom',
+                      animation: 'flux-blink 1s step-end infinite'
+                    }}
+                  />
+                  <style>{`@keyframes flux-blink{50%{opacity:0}}`}</style>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-tertiary)' }}>
+                  <div className="spinner" />
+                  <span>Generating...</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -286,26 +356,78 @@ export function AIPanel() {
             <button className="btn-icon" onClick={handleAttach} title="Voice input">
               <Mic size={16} />
             </button>
+            {/* Stream-to-Note toggle: when active, AI text streams
+                directly into the editor. */}
+            <button
+              className="btn-icon"
+              onClick={() => setStreamToNote((v) => !v)}
+              title={
+                streamToNote
+                  ? 'Stream to Note is ON — AI text writes to the file live'
+                  : 'Stream to Note is OFF — click to write AI text to the file live'
+              }
+              style={{
+                color: streamToNote ? 'var(--accent)' : 'var(--text-tertiary)',
+                position: 'relative'
+              }}
+            >
+              <Zap size={16} />
+              {streamToNote && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: -2,
+                    right: -2,
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    background: 'var(--accent)'
+                  }}
+                />
+              )}
+            </button>
+            {streamToNote && (
+              <select
+                value={streamModeRef.current}
+                onChange={(e) => {
+                  streamModeRef.current = e.target.value as 'replace' | 'append'
+                }}
+                style={{
+                  fontSize: 'var(--font-size-xs)',
+                  padding: '2px 4px',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--radius-sm)',
+                  background: 'var(--bg-primary)',
+                  color: 'var(--text-secondary)'
+                }}
+                title="Stream mode"
+              >
+                <option value="replace">Replace</option>
+                <option value="append">Append</option>
+              </select>
+            )}
           </div>
 
-          <button
-            className="btn btn-primary"
-            onClick={handleSend}
-            disabled={!input.trim() || isGenerating}
-            style={{ gap: 4, padding: '6px 14px' }}
-          >
-            {isGenerating ? (
-              <>
-                <div className="spinner" />
-                <span>Generating...</span>
-              </>
-            ) : (
-              <>
-                <Send size={14} />
-                <span>Generate</span>
-              </>
-            )}
-          </button>
+          {isGenerating ? (
+            <button
+              className="btn btn-ghost"
+              onClick={cancelGenerate}
+              style={{ gap: 4, padding: '6px 14px' }}
+            >
+              <Square size={14} />
+              <span>Stop</span>
+            </button>
+          ) : (
+            <button
+              className="btn btn-primary"
+              onClick={handleSend}
+              disabled={!input.trim() || isGenerating}
+              style={{ gap: 4, padding: '6px 14px' }}
+            >
+              <Send size={14} />
+              <span>Generate</span>
+            </button>
+          )}
         </div>
       </div>
     </div>

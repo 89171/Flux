@@ -1,4 +1,4 @@
-# JSON Editor — Sample PaiNote Plugin
+# JSON Editor — Sample Flux Plugin
 
 Minimal end-to-end example of a **plugin-owned editor** using the iframe
 + postMessage protocol. Everything here is dependency-free — copy the
@@ -16,7 +16,7 @@ json-editor/
 
 ## How the wiring works
 
-1. When the user opens a `.json` file, PaiNote consults its format map,
+1. When the user opens a `.json` file, Flux consults its format map,
    finds `{ kind: "plugin-editor", entryUrl: "file://…/renderer/index.html" }`,
    and mounts a `sandbox="allow-scripts"` iframe at that URL.
 2. The iframe script calls `createPluginEditor(handlers)` which sends
@@ -31,7 +31,7 @@ json-editor/
 
 ## Installing this example locally
 
-1. Start PaiNote, open the Plugin Market.
+1. Start Flux, open the Plugin Market.
 2. Click **Load Local Plugin** and pick this directory.
 3. Create a `.json` file in your workspace — the editor mounts.
 

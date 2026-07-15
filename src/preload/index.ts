@@ -9,7 +9,9 @@ import type {
   FormatBinding,
   FileReadMetaResult,
   FileWriteResult,
-  FileChangedEvent
+  FileChangedEvent,
+  SearchResult,
+  UpdateCheckResult
 } from '../shared/types'
 
 const api = {
@@ -39,7 +41,13 @@ const api = {
     delete: (path: string): Promise<boolean> => ipcRenderer.invoke(IPC.FILE_DELETE, path),
     rename: (oldPath: string, newPath: string): Promise<NoteFile> => ipcRenderer.invoke(IPC.FILE_RENAME, oldPath, newPath),
     move: (sourcePath: string, targetDir: string): Promise<NoteFile> => ipcRenderer.invoke(IPC.FILE_MOVE, sourcePath, targetDir),
-    openExternal: (path: string): Promise<boolean> => ipcRenderer.invoke(IPC.FILE_OPEN_EXTERNAL, path)
+    openExternal: (path: string): Promise<boolean> => ipcRenderer.invoke(IPC.FILE_OPEN_EXTERNAL, path),
+    search: (query: string, maxResults?: number): Promise<SearchResult[]> =>
+      ipcRenderer.invoke(IPC.FILE_SEARCH, query, maxResults),
+    exportPDF: (content: string, fileName: string): Promise<string | null> =>
+      ipcRenderer.invoke(IPC.FILE_EXPORT_PDF, content, fileName),
+    exportHTML: (content: string, fileName: string): Promise<string | null> =>
+      ipcRenderer.invoke(IPC.FILE_EXPORT_HTML, content, fileName)
   },
   window: {
     openNote: (opts: { noteId: string; notePath: string; noteName: string; format: string; content?: string; isPinned?: boolean; opacity?: number; autoCollapse?: boolean }): Promise<unknown> => ipcRenderer.invoke(IPC.WINDOW_OPEN_NOTE, opts),
@@ -89,7 +97,40 @@ const api = {
     chat: (request: AIRequest): Promise<{ success: boolean; data?: AIResponse; error?: string }> => ipcRenderer.invoke(IPC.AI_CHAT, request),
     transcribe: (audioPath: string): Promise<{ success: boolean; data?: string; error?: string }> => ipcRenderer.invoke(IPC.AI_TRANSCRIBE, audioPath),
     cancel: (conversationId: string): Promise<boolean> => ipcRenderer.invoke(IPC.AI_CANCEL, conversationId),
-    settings: (opts?: { provider: string; apiKey: string; model: string; baseUrl: string }): Promise<boolean | { provider: string; apiKey: string; model: string; baseUrl: string }> => ipcRenderer.invoke(IPC.AI_SETTINGS, opts)
+    settings: (opts?: { provider: string; apiKey: string; model: string; baseUrl: string }): Promise<boolean | { provider: string; apiKey: string; model: string; baseUrl: string }> => ipcRenderer.invoke(IPC.AI_SETTINGS, opts),
+    testConfig: (config: Partial<{ provider: string; apiKey: string; model: string; baseUrl: string }>): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke(IPC.AI_TEST_CONFIG, config),
+    /**
+     * Start a streaming generation. Calls onChunk for each text chunk,
+     * onDone when complete, onError on failure. Returns a cancel
+     * function that removes the IPC listeners (does NOT abort the
+     * server-side request — that requires a separate ai.cancel call).
+     */
+    generateStream: (
+      request: AIRequest,
+      onChunk: (chunk: string) => void,
+      onDone: (conversationId: string) => void,
+      onError: (error: string) => void
+    ): (() => void) => {
+      const chunkHandler = (_: unknown, chunk: string): void => onChunk(chunk)
+      const doneHandler = (_: unknown, data: { conversationId: string }): void => {
+        cleanup()
+        onDone(data.conversationId)
+      }
+      const errorHandler = (_: unknown, error: string): void => {
+        cleanup()
+        onError(error)
+      }
+      const cleanup = (): void => {
+        ipcRenderer.removeListener(IPC.AI_STREAM_CHUNK, chunkHandler)
+        ipcRenderer.removeListener(IPC.AI_STREAM_DONE, doneHandler)
+        ipcRenderer.removeListener(IPC.AI_STREAM_ERROR, errorHandler)
+      }
+      ipcRenderer.on(IPC.AI_STREAM_CHUNK, chunkHandler)
+      ipcRenderer.on(IPC.AI_STREAM_DONE, doneHandler)
+      ipcRenderer.on(IPC.AI_STREAM_ERROR, errorHandler)
+      ipcRenderer.send(IPC.AI_GENERATE_STREAM, request)
+      return cleanup
+    }
   },
   settings: {
     get: (): Promise<AppSettings> => ipcRenderer.invoke(IPC.SETTINGS_GET),
@@ -110,26 +151,34 @@ const api = {
       workspace: string
       builtinPlugins: string
       userPlugins: string
-    }> => ipcRenderer.invoke(IPC.APP_GET_PATHS)
+    }> => ipcRenderer.invoke(IPC.APP_GET_PATHS),
+    openUrl: (url: string): Promise<boolean> => ipcRenderer.invoke(IPC.APP_OPEN_URL, url),
+    checkForUpdates: (): Promise<UpdateCheckResult> =>
+      ipcRenderer.invoke(IPC.APP_CHECK_FOR_UPDATES)
   },
   on: {
     noteLoaded: (callback: (data: unknown) => void) => {
       const handler = (_: unknown, data: unknown) => callback(data)
       ipcRenderer.on('note:loaded', handler)
       return () => ipcRenderer.removeListener('note:loaded', handler)
+    },
+    menuAction: (callback: (action: string) => void) => {
+      const handler = (_: unknown, action: string) => callback(action)
+      ipcRenderer.on(IPC.MENU_ACTION_EVENT, handler)
+      return () => ipcRenderer.removeListener(IPC.MENU_ACTION_EVENT, handler)
     }
   }
 }
 
-export type PaiNoteAPI = typeof api
+export type FluxAPI = typeof api
 
 if (process.contextIsolated) {
   try {
-    contextBridge.exposeInMainWorld('painote', api)
+    contextBridge.exposeInMainWorld('flux', api)
   } catch (error) {
     console.error(error)
   }
 } else {
   // @ts-ignore
-  window.painote = api
+  window.flux = api
 }

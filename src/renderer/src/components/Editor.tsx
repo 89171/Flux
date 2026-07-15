@@ -1,37 +1,106 @@
 /**
- * PaiNote Editor Component
+ * Flux Editor Component
  *
  * Main note editor area with toolbar and content editing.
  * Supports markdown (WYSIWYG via Milkdown) and non-markdown formats (textarea).
  * Features: drag & drop files, keyboard save shortcut, AI generate, pin to desktop.
  */
 
-import { useCallback, useState, useEffect, useRef, lazy, Suspense } from 'react'
+import { Component, useCallback, useState, useEffect, lazy, Suspense, type ReactNode } from 'react'
 import {
   Save,
   Pin,
   ExternalLink,
   Sparkles,
-  FileText
+  FileText,
+  List as ListIcon,
+  Download
 } from 'lucide-react'
 import MarkdownEditor from './MilkdownEditor'
-import DrawioEditor from './DrawioEditor'
-import MindmapEditor from './MindmapEditor'
-import WhiteboardEditor from './WhiteboardEditor'
-import ExcalidrawEditor from './ExcalidrawEditor'
-import KanbanEditor from './KanbanEditor'
-import PlantUmlEditor from './PlantUmlEditor'
 import PluginIframeEditor from './PluginIframeEditor'
-// Heavy libs (mermaid ≈1MB, bpmn-js ≈600KB, dmn-js ≈900KB) — code-split
-// them out so users who never open these file types don't pay the
-// download cost. Vite emits a separate chunk per import().
+import CodeMirrorEditor from './CodeMirrorEditor'
+import Outline from './Outline'
+import EditorContextMenu, { type ContextMenuItem } from './EditorContextMenu'
+// Heavy editors are code-split so users who never open these file types
+// don't pay the download cost. Vite emits a separate chunk per import().
+//  - DrawioEditor     : minimal (iframe), but kept lazy for consistency
+//  - MindmapEditor    : mind-elixir (~200KB)
+//  - WhiteboardEditor : tldraw (~3MB)
+//  - ExcalidrawEditor : @excalidraw/excalidraw (~1MB)
+//  - KanbanEditor     : marked (~50KB) + React
+//  - PlantUmlEditor   : plantuml-encoder (~10KB)
+//  - MermaidEditor    : mermaid (~1MB)
+//  - BpmnEditor       : bpmn-js (~600KB)
+//  - DmnEditor        : dmn-js (~900KB)
+const DrawioEditor = lazy(() => import('./DrawioEditor'))
+const MindmapEditor = lazy(() => import('./MindmapEditor'))
+const WhiteboardEditor = lazy(() => import('./WhiteboardEditor'))
+const ExcalidrawEditor = lazy(() => import('./ExcalidrawEditor'))
+const KanbanEditor = lazy(() => import('./KanbanEditor'))
+const PlantUmlEditor = lazy(() => import('./PlantUmlEditor'))
 const MermaidEditor = lazy(() => import('./MermaidEditor'))
 const BpmnEditor = lazy(() => import('./BpmnEditor'))
 const DmnEditor = lazy(() => import('./DmnEditor'))
 import { useFileStore } from '../stores/fileStore'
 import { useAIStore } from '../stores/aiStore'
 import { usePluginStore } from '../stores/pluginStore'
+import FindReplace from './FindReplace'
 import type { FormatBinding, NoteFormat } from '@shared/types'
+
+/**
+ * Error boundary that catches chunk-load failures (network) and runtime
+ * crashes from any single editor. Without this, one failing lazy chunk
+ * takes down the whole editor area.
+ */
+interface ErrorBoundaryState {
+  error: Error | null
+}
+class EditorErrorBoundary extends Component<
+  { children: ReactNode; onReset: () => void },
+  ErrorBoundaryState
+> {
+  state: ErrorBoundaryState = { error: null }
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { error }
+  }
+  componentDidCatch(error: Error): void {
+    console.error('[Editor] renderer crashed:', error)
+  }
+  render(): ReactNode {
+    if (this.state.error) {
+      return (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: '100%',
+            gap: 12,
+            padding: 24,
+            color: 'var(--text-secondary)',
+            fontSize: 13
+          }}
+        >
+          <p style={{ fontWeight: 600, color: 'var(--text-primary)' }}>编辑器加载失败</p>
+          <p style={{ fontSize: 12, color: 'var(--text-tertiary)', textAlign: 'center' }}>
+            {this.state.error.message}
+          </p>
+          <button
+            className="btn btn-ghost"
+            onClick={() => {
+              this.setState({ error: null })
+              this.props.onReset()
+            }}
+          >
+            重试
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 /** Placeholder shown while a lazy-loaded editor chunk downloads. */
 function LazyEditorFallback(): JSX.Element {
@@ -43,10 +112,22 @@ function LazyEditorFallback(): JSX.Element {
         justifyContent: 'center',
         height: '100%',
         color: 'var(--text-tertiary)',
-        fontSize: 13
+        fontSize: 13,
+        gap: 8
       }}
     >
+      <span
+        style={{
+          width: 14,
+          height: 14,
+          border: '2px solid var(--border-color)',
+          borderTopColor: 'var(--accent)',
+          borderRadius: '50%',
+          animation: 'flux-spin 0.7s linear infinite'
+        }}
+      />
       Loading editor…
+      <style>{`@keyframes flux-spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   )
 }
@@ -107,6 +188,11 @@ function formatLabel(format?: NoteFormat): string {
   }
 }
 
+const DEFAULT_FONT_SIZE = 14
+const MIN_FONT_SIZE = 10
+const MAX_FONT_SIZE = 28
+const FONT_SIZE_STEP = 2
+
 export default function Editor(): JSX.Element {
   const { currentFile, currentContent, currentMtime, setContent, saveFile, isDirty } =
     useFileStore()
@@ -115,7 +201,14 @@ export default function Editor(): JSX.Element {
 
   const [isDragOver, setIsDragOver] = useState(false)
   const [isPinned, setIsPinned] = useState(false)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE)
+  const [showFindReplace, setShowFindReplace] = useState(false)
+  const [findReplaceMode, setFindReplaceMode] = useState<'find' | 'replace'>('find')
+  const [showOutline, setShowOutline] = useState(false)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null)
+  // Bumped whenever the user clicks "retry" in the error boundary —
+  // forces a remount of the lazy editor subtree.
+  const [rendererKey, setRendererKey] = useState(0)
 
   // Look up the binding for the currently open file. The binding drives
   // which editor gets mounted; the string `format` field on NoteFile is
@@ -128,17 +221,61 @@ export default function Editor(): JSX.Element {
     currentBinding?.kind === 'builtin' && currentBinding.renderer === 'markdown'
   const format = currentFile?.format
 
-  // Keyboard shortcut: Cmd/Ctrl+S to save
+  // Keyboard shortcuts: Cmd/Ctrl+S to save, Cmd/Ctrl+/-/0 to zoom, Cmd/Ctrl+F/H find/replace
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+      const mod = e.metaKey || e.ctrlKey
+      if (mod && e.key === 's') {
         e.preventDefault()
         saveFile()
+      }
+      if (mod && (e.key === '=' || e.key === '+')) {
+        e.preventDefault()
+        setFontSize((prev) => Math.min(prev + FONT_SIZE_STEP, MAX_FONT_SIZE))
+      }
+      if (mod && e.key === '-') {
+        e.preventDefault()
+        setFontSize((prev) => Math.max(prev - FONT_SIZE_STEP, MIN_FONT_SIZE))
+      }
+      if (mod && e.key === '0') {
+        e.preventDefault()
+        setFontSize(DEFAULT_FONT_SIZE)
+      }
+      if (mod && !e.shiftKey && e.key === 'f') {
+        e.preventDefault()
+        setFindReplaceMode('find')
+        setShowFindReplace(true)
+      }
+      if (mod && (e.key === 'h' || (e.shiftKey && e.key === 'H'))) {
+        e.preventDefault()
+        setFindReplaceMode('replace')
+        setShowFindReplace(true)
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [saveFile])
+
+  // Listen for find/replace and zoom events from menu/command palette
+  useEffect(() => {
+    const findHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as string
+      setFindReplaceMode(detail === 'replace' ? 'replace' : 'find')
+      setShowFindReplace(true)
+    }
+    const zoomHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as string
+      if (detail === 'in') setFontSize((p) => Math.min(p + FONT_SIZE_STEP, MAX_FONT_SIZE))
+      if (detail === 'out') setFontSize((p) => Math.max(p - FONT_SIZE_STEP, MIN_FONT_SIZE))
+      if (detail === 'reset') setFontSize(DEFAULT_FONT_SIZE)
+    }
+    window.addEventListener('flux:find', findHandler)
+    window.addEventListener('flux:zoom', zoomHandler)
+    return () => {
+      window.removeEventListener('flux:find', findHandler)
+      window.removeEventListener('flux:zoom', zoomHandler)
+    }
+  }, [])
 
   // Drag & drop external files
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -165,7 +302,7 @@ export default function Editor(): JSX.Element {
         const file = files[0] as File & { path?: string }
         if (file.path) {
           const detectedFormat = getFormatFromExtension(file.name, formatMap)
-          window.painote.window.openNote({
+          window.flux.window.openNote({
             noteId: file.path,
             notePath: file.path,
             noteName: file.name,
@@ -191,7 +328,7 @@ export default function Editor(): JSX.Element {
       const newState = !isPinned
       if (newState) {
         // Open a pinned note window
-        await window.painote.window.openNote({
+        await window.flux.window.openNote({
           noteId: currentFile.id,
           notePath: currentFile.path,
           noteName: currentFile.name,
@@ -200,7 +337,7 @@ export default function Editor(): JSX.Element {
         })
       } else {
         // Close the pinned note window
-        await window.painote.window.close(currentFile.id)
+        await window.flux.window.close(currentFile.id)
       }
       setIsPinned(newState)
     } catch (err) {
@@ -211,7 +348,7 @@ export default function Editor(): JSX.Element {
   // Open in New Window handler
   const handleOpenNewWindow = useCallback(() => {
     if (!currentFile) return
-    window.painote.window.openNote({
+    window.flux.window.openNote({
       noteId: currentFile.id,
       notePath: currentFile.path,
       noteName: currentFile.name,
@@ -220,13 +357,201 @@ export default function Editor(): JSX.Element {
     })
   }, [currentFile])
 
-  // Handle non-markdown textarea change
-  const handleTextareaChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      setContent(e.target.value)
-    },
-    [setContent]
-  )
+  // Export handlers
+  const handleExportHTML = useCallback(async () => {
+    if (!currentFile) return
+    try {
+      await window.flux.file.exportHTML(currentContent, currentFile.name)
+    } catch (err) {
+      console.error('Export HTML failed:', err)
+    }
+  }, [currentFile, currentContent])
+
+  const handleExportPDF = useCallback(async () => {
+    if (!currentFile) return
+    try {
+      await window.flux.file.exportPDF(currentContent, currentFile.name)
+    } catch (err) {
+      console.error('Export PDF failed:', err)
+    }
+  }, [currentFile, currentContent])
+
+  // Context menu
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const items: ContextMenuItem[] = [
+      {
+        label: 'Find',
+        action: () => { setFindReplaceMode('find'); setShowFindReplace(true) }
+      },
+      {
+        label: 'Replace',
+        action: () => { setFindReplaceMode('replace'); setShowFindReplace(true) }
+      },
+      { label: '', action: () => {}, separator: true },
+      {
+        label: 'Save',
+        action: () => saveFile(),
+        disabled: !isDirty
+      },
+      { label: '', action: () => {}, separator: true }
+    ]
+    if (isMarkdown) {
+      items.push({
+        label: showOutline ? 'Hide Outline' : 'Show Outline',
+        action: () => setShowOutline((v) => !v)
+      })
+      items.push({ label: '', action: () => {}, separator: true })
+      items.push({
+        label: 'Export as HTML',
+        action: handleExportHTML
+      })
+      items.push({
+        label: 'Export as PDF',
+        action: handleExportPDF
+      })
+    }
+    setContextMenu({ x: e.clientX, y: e.clientY, items })
+  }, [saveFile, isDirty, isMarkdown, showOutline, handleExportHTML, handleExportPDF])
+
+  /**
+   * Render the inner editor for the active binding. The outer
+   * ErrorBoundary + Suspense wrap this so chunk-load failures and
+   * runtime crashes are isolated from the rest of the app.
+   *
+   * Routing is a flat switch on `currentBinding.renderer` — kept here
+   * rather than as a lookup table because each branch needs slightly
+   * different props (e.g. DrawioEditor's onChange is typed as xml),
+   * and a table would just push the conditional one level deeper.
+   *
+   * `currentFile` is guaranteed non-null here because this function
+   * is only called from the JSX below the `if (!currentFile) return`
+   * early-return — but TS can't see across the closure, so we assert.
+   */
+  const renderEditor = (): JSX.Element => {
+    const file = currentFile!
+    if (currentBinding?.kind === 'plugin-editor') {
+      return (
+        <PluginIframeEditor
+          key={file.path}
+          entryUrl={currentBinding.entryUrl}
+          value={currentContent}
+          onChange={setContent}
+          onRequestSave={saveFile}
+          filePath={file.path}
+          mtime={currentMtime}
+        />
+      )
+    }
+    if (isMarkdown) {
+      return (
+        <MarkdownEditor
+          key={file.path}
+          value={currentContent}
+          onChange={(md) => setContent(md)}
+          className="markdown-editor-wrapper"
+        />
+      )
+    }
+    if (currentBinding?.kind === 'builtin') {
+      switch (currentBinding.renderer) {
+        case 'drawio':
+          return (
+            <DrawioEditor
+              key={file.path}
+              value={currentContent}
+              onChange={(xml) => setContent(xml)}
+              onRequestSave={saveFile}
+              className="drawio-editor-wrapper"
+            />
+          )
+        case 'mindmap':
+          return (
+            <MindmapEditor
+              key={file.path}
+              value={currentContent}
+              onChange={(data) => setContent(data)}
+              className="mindmap-editor-wrapper"
+            />
+          )
+        case 'whiteboard':
+          return (
+            <WhiteboardEditor
+              key={file.path}
+              value={currentContent}
+              onChange={(data) => setContent(data)}
+              className="whiteboard-editor-wrapper"
+            />
+          )
+        case 'excalidraw':
+          return (
+            <ExcalidrawEditor
+              key={file.path}
+              value={currentContent}
+              onChange={(data) => setContent(data)}
+              className="excalidraw-editor-wrapper"
+            />
+          )
+        case 'kanban':
+          return (
+            <KanbanEditor
+              key={file.path}
+              value={currentContent}
+              onChange={(data) => setContent(data)}
+              className="kanban-editor-wrapper"
+            />
+          )
+        case 'plantuml':
+          return (
+            <PlantUmlEditor
+              key={file.path}
+              value={currentContent}
+              onChange={(data) => setContent(data)}
+              className="plantuml-editor-wrapper"
+            />
+          )
+        case 'mermaid':
+          return (
+            <MermaidEditor
+              key={file.path}
+              value={currentContent}
+              onChange={(data) => setContent(data)}
+              className="mermaid-editor-wrapper"
+            />
+          )
+        case 'bpmn':
+          return (
+            <BpmnEditor
+              key={file.path}
+              value={currentContent}
+              onChange={(data) => setContent(data)}
+              className="bpmn-editor-wrapper"
+            />
+          )
+        case 'dmn':
+          return (
+            <DmnEditor
+              key={file.path}
+              value={currentContent}
+              onChange={(data) => setContent(data)}
+              className="dmn-editor-wrapper"
+            />
+          )
+        default:
+          // fallthrough to plaintext
+          break
+      }
+    }
+    return (
+      <CodeMirrorEditor
+        key={file.path}
+        value={currentContent}
+        onChange={setContent}
+        fileName={file.name}
+        fontSize={fontSize}
+      />
+    )
+  }
 
   // Empty state - no file open
   if (!currentFile) {
@@ -380,6 +705,46 @@ export default function Editor(): JSX.Element {
             <Pin size={15} />
           </button>
 
+          {isMarkdown && (
+            <button
+              className="editor-toolbar-btn"
+              onClick={() => setShowOutline((v) => !v)}
+              title="Toggle Outline"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                padding: '6px',
+                border: 'none',
+                borderRadius: '6px',
+                background: showOutline ? 'var(--bg-active)' : 'none',
+                color: showOutline ? 'var(--text-primary)' : 'var(--text-secondary)',
+                cursor: 'pointer'
+              }}
+            >
+              <ListIcon size={15} />
+            </button>
+          )}
+
+          {isMarkdown && (
+            <button
+              className="editor-toolbar-btn"
+              onClick={handleExportHTML}
+              title="Export as HTML"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                padding: '6px',
+                border: 'none',
+                borderRadius: '6px',
+                background: 'none',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer'
+              }}
+            >
+              <Download size={15} />
+            </button>
+          )}
+
           <button
             className="editor-toolbar-btn"
             onClick={saveFile}
@@ -406,124 +771,54 @@ export default function Editor(): JSX.Element {
 
       {/* Editor content area */}
       <div
-        className="editor-content"
         style={{
           flex: 1,
-          overflow: 'auto',
-          position: 'relative'
+          display: 'flex',
+          overflow: 'hidden'
         }}
       >
-        {currentBinding?.kind === 'plugin-editor' ? (
-          <PluginIframeEditor
-            key={currentFile.path}
-            entryUrl={currentBinding.entryUrl}
+        <div
+          className="editor-content"
+          onContextMenu={handleContextMenu}
+          style={{
+            flex: 1,
+            overflow: 'auto',
+            position: 'relative',
+            fontSize: `${fontSize}px`
+          }}
+        >
+        {showFindReplace && (
+          <FindReplace
             value={currentContent}
             onChange={setContent}
-            onRequestSave={saveFile}
-            filePath={currentFile.path}
-            mtime={currentMtime}
+            onClose={() => setShowFindReplace(false)}
+            initialMode={findReplaceMode}
           />
-        ) : isMarkdown ? (
-          <MarkdownEditor
-            key={currentFile.path}
-            value={currentContent}
-            onChange={(md) => setContent(md)}
-            className="markdown-editor-wrapper"
-          />
-        ) : currentBinding?.kind === 'builtin' && currentBinding.renderer === 'drawio' ? (
-          <DrawioEditor
-            key={currentFile.path}
-            value={currentContent}
-            onChange={(xml) => setContent(xml)}
-            className="drawio-editor-wrapper"
-          />
-        ) : currentBinding?.kind === 'builtin' && currentBinding.renderer === 'mindmap' ? (
-          <MindmapEditor
-            key={currentFile.path}
-            value={currentContent}
-            onChange={(data) => setContent(data)}
-            className="mindmap-editor-wrapper"
-          />
-        ) : currentBinding?.kind === 'builtin' && currentBinding.renderer === 'whiteboard' ? (
-          <WhiteboardEditor
-            key={currentFile.path}
-            value={currentContent}
-            onChange={(data) => setContent(data)}
-            className="whiteboard-editor-wrapper"
-          />
-        ) : currentBinding?.kind === 'builtin' && currentBinding.renderer === 'excalidraw' ? (
-          <ExcalidrawEditor
-            key={currentFile.path}
-            value={currentContent}
-            onChange={(data) => setContent(data)}
-            className="excalidraw-editor-wrapper"
-          />
-        ) : currentBinding?.kind === 'builtin' && currentBinding.renderer === 'kanban' ? (
-          <KanbanEditor
-            key={currentFile.path}
-            value={currentContent}
-            onChange={(data) => setContent(data)}
-            className="kanban-editor-wrapper"
-          />
-        ) : currentBinding?.kind === 'builtin' && currentBinding.renderer === 'plantuml' ? (
-          <PlantUmlEditor
-            key={currentFile.path}
-            value={currentContent}
-            onChange={(data) => setContent(data)}
-            className="plantuml-editor-wrapper"
-          />
-        ) : currentBinding?.kind === 'builtin' && currentBinding.renderer === 'mermaid' ? (
-          <Suspense fallback={<LazyEditorFallback />}>
-            <MermaidEditor
-              key={currentFile.path}
-              value={currentContent}
-              onChange={(data) => setContent(data)}
-              className="mermaid-editor-wrapper"
-            />
+        )}
+        <EditorErrorBoundary onReset={() => setRendererKey((k) => k + 1)}>
+          <Suspense fallback={<LazyEditorFallback />} key={rendererKey}>
+            {renderEditor()}
           </Suspense>
-        ) : currentBinding?.kind === 'builtin' && currentBinding.renderer === 'bpmn' ? (
-          <Suspense fallback={<LazyEditorFallback />}>
-            <BpmnEditor
-              key={currentFile.path}
-              value={currentContent}
-              onChange={(data) => setContent(data)}
-              className="bpmn-editor-wrapper"
-            />
-          </Suspense>
-        ) : currentBinding?.kind === 'builtin' && currentBinding.renderer === 'dmn' ? (
-          <Suspense fallback={<LazyEditorFallback />}>
-            <DmnEditor
-              key={currentFile.path}
-              value={currentContent}
-              onChange={(data) => setContent(data)}
-              className="dmn-editor-wrapper"
-            />
-          </Suspense>
-        ) : (
-          <textarea
-            ref={textareaRef}
-            value={currentContent}
-            onChange={handleTextareaChange}
-            spellCheck={false}
-            style={{
-              width: '100%',
-              height: '100%',
-              padding: '24px 32px',
-              border: 'none',
-              outline: 'none',
-              resize: 'none',
-              fontFamily: 'var(--font-mono, "SF Mono", "Fira Code", "Cascadia Code", monospace)',
-              fontSize: '14px',
-              lineHeight: 1.7,
-              color: 'var(--text-primary)',
-              backgroundColor: 'transparent',
-              tabSize: 2,
-              boxSizing: 'border-box'
-            }}
-            placeholder="Start typing..."
+        </EditorErrorBoundary>
+        </div>
+        {showOutline && isMarkdown && (
+          <Outline
+            content={currentContent}
+            onNavigate={() => {/* TODO: scroll to heading */}}
+            onClose={() => setShowOutline(false)}
           />
         )}
       </div>
+
+      {/* Context menu */}
+      {contextMenu && (
+        <EditorContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          actions={contextMenu.items}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   )
 }
