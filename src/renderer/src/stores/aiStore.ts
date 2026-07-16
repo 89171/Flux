@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AIMessage, AIRequest } from '@shared/types'
+import type { AIMessage, AIToolEvent, AIRequest } from '@shared/types'
 
 interface AIState {
   isGenerating: boolean
@@ -84,6 +84,17 @@ export const useAIStore = create<AIState>((set, get) => ({
             set({ isGenerating: false, streamingContent: '', error })
             streamCleanup = null
             reject(new Error(error))
+          },
+          (toolEvent: AIToolEvent) => {
+            const toolMsg: AIMessage = {
+              role: 'tool',
+              content: toolEvent.result.success
+                ? `Created: ${toolEvent.result.filePath}`
+                : `Failed: ${toolEvent.result.error}`,
+              timestamp: Date.now(),
+              toolEvent
+            }
+            set((state) => ({ messages: [...state.messages, toolMsg] }))
           }
         )
       })

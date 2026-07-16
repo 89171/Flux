@@ -5,9 +5,11 @@ import type {
   AIResponse,
   AIMessage,
   AIConversation,
+  AIToolEvent,
   NoteFormat
 } from '@shared/types'
 import type { PluginManager } from './PluginManager'
+import type { FileSystemManager } from './FileSystemManager'
 import { DEFAULT_AI_MODEL, DEFAULT_AI_BASE_URL } from '@shared/constants'
 
 interface AIConfigOptions {
@@ -19,7 +21,13 @@ interface AIConfigOptions {
 
 interface AIMessageEntry {
   role: string
-  content: string
+  content: string | null
+  tool_call_id?: string
+  tool_calls?: Array<{
+    id: string
+    type: 'function'
+    function: { name: string; arguments: string }
+  }>
 }
 
 interface AICallResult {
@@ -30,6 +38,39 @@ interface AICallResult {
   }
 }
 
+interface AIWithToolsResult {
+  content: string
+  toolCalls?: Array<{
+    id: string
+    type: 'function'
+    function: { name: string; arguments: string }
+  }>
+}
+
+const FLUX_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'create_file',
+      description: 'Create a new file in the workspace with the given path and content. Supported extensions: .md (markdown), .todo (kanban board), .mmd (mermaid diagram), .puml (plantuml), .excalidraw, .drawio, .mindmap, .bpmn, .dmn.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            description: 'File path relative to workspace root, e.g. "meeting-notes.md" or "projects/todo.todo"'
+          },
+          content: {
+            type: 'string',
+            description: 'Initial file content'
+          }
+        },
+        required: ['path', 'content']
+      }
+    }
+  }
+]
+
 export class AIService {
   conversations: Map<string, AIConversation> = new Map()
   activeRequests: Map<string, AbortController> = new Map()
@@ -39,7 +80,7 @@ export class AIService {
   private baseUrl: string = DEFAULT_AI_BASE_URL
   private provider: 'openai' | 'anthropic' | 'deepseek' | 'kimi' | 'minimax' | 'glm' | 'local' | 'none' = 'none'
 
-  constructor(private pluginManager: PluginManager) {}
+  constructor(private pluginManager: PluginManager, private fsManager?: FileSystemManager) {}
 
   configure(opts: AIConfigOptions): void {
     if (opts.provider !== undefined) this.provider = opts.provider
@@ -191,7 +232,10 @@ export class AIService {
     return this.generate(request)
   }
 
-  async *generateStream(request: AIRequest): AsyncGenerator<string, void, unknown> {
+  async *generateStream(
+    request: AIRequest,
+    onToolExecuted?: (evt: AIToolEvent) => void
+  ): AsyncGenerator<string, void, unknown> {
     const conversationId = request.conversationId || this.generateConversationId()
     const adapter = this.pluginManager.getAIAdapter(request.format)
     const systemPrompt = adapter?.systemPrompt || this.getDefaultSystemPrompt(request.format)
@@ -209,15 +253,53 @@ export class AIService {
     }
     conversation.messages.push(userMessage)
 
-    const apiMessages: AIMessageEntry[] = [{ role: 'system', content: systemPrompt }]
+    let apiMessages: AIMessageEntry[] = [{ role: 'system', content: systemPrompt }]
     for (const msg of conversation.messages) {
-      apiMessages.push({ role: msg.role, content: msg.content })
+      if (msg.role === 'user' || msg.role === 'assistant') {
+        apiMessages.push({ role: msg.role, content: msg.content })
+      }
     }
 
     const abortController = new AbortController()
     this.activeRequests.set(conversationId, abortController)
 
     try {
+      // Tool-calling pass: for OpenAI-compatible providers, do a quick
+      // non-streaming call with tools to detect if the AI wants to create
+      // files. If yes, execute and inject results before streaming the reply.
+      if (
+        onToolExecuted &&
+        this.fsManager &&
+        this.isConfigured() &&
+        this.provider !== 'anthropic' &&
+        this.provider !== 'local' &&
+        this.provider !== 'none'
+      ) {
+        const toolsResult = await this.callAIWithTools(apiMessages, abortController.signal)
+        if (toolsResult.toolCalls && toolsResult.toolCalls.length > 0) {
+          apiMessages = [
+            ...apiMessages,
+            {
+              role: 'assistant',
+              content: toolsResult.content || null,
+              tool_calls: toolsResult.toolCalls
+            }
+          ]
+          for (const tc of toolsResult.toolCalls) {
+            let args: Record<string, unknown> = {}
+            let result: { success: boolean; filePath?: string; error?: string }
+            try {
+              args = JSON.parse(tc.function.arguments) as Record<string, unknown>
+              result = await this.executeToolCall(tc.function.name, args)
+            } catch (err) {
+              result = { success: false, error: err instanceof Error ? err.message : String(err) }
+            }
+            onToolExecuted({ conversationId, tool: tc.function.name, args, result })
+            apiMessages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) })
+          }
+        }
+      }
+
       let fullContent = ''
       for await (const chunk of this.callAIStream(apiMessages, abortController.signal)) {
         fullContent += chunk
@@ -563,6 +645,64 @@ export class AIService {
     }
   }
 
+  private async callAIWithTools(
+    messages: AIMessageEntry[],
+    signal?: AbortSignal
+  ): Promise<AIWithToolsResult> {
+    try {
+      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`
+        },
+        body: JSON.stringify({
+          model: this.model,
+          messages,
+          tools: FLUX_TOOLS,
+          tool_choice: 'auto'
+        }),
+        signal
+      })
+      if (!response.ok) return { content: '' }
+      const data = (await response.json()) as {
+        choices: Array<{
+          message: {
+            content: string | null
+            tool_calls?: Array<{
+              id: string
+              type: 'function'
+              function: { name: string; arguments: string }
+            }>
+          }
+        }>
+      }
+      const msg = data.choices[0]?.message
+      return { content: msg?.content || '', toolCalls: msg?.tool_calls }
+    } catch {
+      return { content: '' }
+    }
+  }
+
+  private async executeToolCall(
+    name: string,
+    args: Record<string, unknown>
+  ): Promise<{ success: boolean; filePath?: string; error?: string }> {
+    if (name === 'create_file') {
+      if (!this.fsManager) return { success: false, error: 'File system not available' }
+      const path = String(args.path ?? '')
+      const content = String(args.content ?? '')
+      if (!path) return { success: false, error: 'path is required' }
+      try {
+        const created = this.fsManager.createFile(path, content)
+        return { success: true, filePath: created.path }
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+    return { success: false, error: `Unknown tool: ${name}` }
+  }
+
   generateMockResponse(messages: AIMessageEntry[]): string {
     const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user')
     const prompt = lastUserMessage?.content || ''
@@ -663,7 +803,7 @@ This content was generated as a placeholder. Configure your AI settings in Prefe
   private getDefaultSystemPrompt(format: NoteFormat): string {
     switch (format) {
       case 'markdown':
-        return 'You are an expert Markdown assistant. You can create, edit, and transform Markdown documents. Generate well-structured content with headings, lists, tables, code blocks, and blockquotes. When the user provides existing content, improve or transform it based on their request. Always respond with valid Markdown.'
+        return 'You are an expert Markdown assistant. You can create, edit, and transform Markdown documents. Generate well-structured content with headings, lists, tables, code blocks, and blockquotes. When the user provides existing content, improve or transform it based on their request. Always respond with valid Markdown. When the user asks to create a new file, use the create_file tool with an appropriate filename and content.'
       case 'mermaid':
         return 'You are an expert at creating Mermaid diagrams. Generate valid Mermaid syntax for flowcharts, sequence diagrams, class diagrams, state diagrams, ER diagrams, and Gantt charts. Only output the Mermaid code inside a ```mermaid code block, no explanations. Use proper node shapes, arrow types, and styling. Example flowchart:\n\n```mermaid\nflowchart TD\n    A[Start] --> B{Decision}\n    B -->|Yes| C[Action 1]\n    B -->|No| D[Action 2]\n    C --> E[End]\n    D --> E\n```'
       case 'plantuml':

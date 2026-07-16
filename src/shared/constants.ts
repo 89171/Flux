@@ -28,3 +28,10 @@ export const DEFAULT_AI_MODEL = 'gpt-4o-mini'
 export const DEFAULT_AI_BASE_URL = 'https://api.openai.com/v1'
 export const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1'
 export const DEFAULT_DEEPSEEK_MODEL = 'deepseek-chat'
+
+/**
+ * Returned by SETTINGS_GET in place of the real API key. The renderer
+ * displays "configured" and echoes this back on save when the user hasn't
+ * changed the key, so the plaintext never enters renderer memory.
+ */
+export const API_KEY_SENTINEL = '__flux_key_configured__'

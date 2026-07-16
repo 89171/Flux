@@ -49,6 +49,8 @@ export const IPC = {
   AI_STREAM_CHUNK: 'ai:streamChunk',
   AI_STREAM_DONE: 'ai:streamDone',
   AI_STREAM_ERROR: 'ai:streamError',
+  /** Broadcast: a tool call executed during a stream. Payload: AIToolEvent. */
+  AI_TOOL_EXECUTED: 'ai:toolExecuted',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
   DIALOG_OPEN_FILE: 'dialog:openFile',

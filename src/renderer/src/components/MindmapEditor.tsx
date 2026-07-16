@@ -1,12 +1,12 @@
 /**
  * MindmapEditor — Mind-Elixir-backed built-in renderer.
  *
- * Interface (props: value/onChange/className) is unchanged from the old
- * hand-rolled SVG version, so callers don't care about the swap. The
- * on-disk file format is preserved as an indented plaintext outline
- * (one level per two spaces / tab) — it stays diff-friendly and
- * openable in any text editor. Mind-Elixir's richer JSON structure is
- * only used in memory; the bridge below flattens it back to text.
+ * File format: JSON matching MindElixir's MindElixirData shape
+ * (`{ nodeData, direction, arrows?, summaries?, theme? }`). This
+ * preserves per-node left/right positions and the global direction so
+ * the layout survives file close/reopen. Backward-compatible with the
+ * old indented outline format — old files are migrated to JSON on the
+ * first save. Default direction is RIGHT (向右扩散).
  *
  * If the file's first parse fails we fall back to a fresh "Central
  * Topic" tree so users never see a broken canvas.
@@ -29,7 +29,6 @@ export interface MindmapEditorProps {
 let uidCounter = 0
 const newUid = (): string => `me-${Date.now().toString(36)}-${(++uidCounter).toString(36)}`
 
-/** Number of leading whitespace characters — tabs and spaces both count. */
 function indentDepth(line: string): number {
   let n = 0
   for (const ch of line) {
@@ -39,12 +38,6 @@ function indentDepth(line: string): number {
   return n
 }
 
-/**
- * Parse an indented outline into a Mind-Elixir node tree. Empty / blank
- * input yields a single "Central Topic" root so the canvas is never
- * empty. Ill-shaped input (child before root) is tolerated — anything
- * deeper than the current stack top attaches to the last real parent.
- */
 function outlineToNode(raw: string): NodeObj {
   const lines = raw.split('\n').filter((l) => l.trim().length > 0)
   if (lines.length === 0) {
@@ -66,18 +59,41 @@ function outlineToNode(raw: string): NodeObj {
 }
 
 /**
- * Serialise a Mind-Elixir node tree back to the indented outline
- * format. Uses two spaces per level to stay portable across editors.
+ * Parse on-disk string to MindElixirData. Accepts:
+ *  - JSON starting with `{` (new format — direction + full nodeData)
+ *  - Plain indented outline (old format — migrated to JSON on first save)
  */
-function nodeToOutline(node: NodeObj, depth = 0): string {
-  const indent = '  '.repeat(depth)
-  let out = `${indent}${node.topic}`
-  if (node.children?.length) {
-    for (const child of node.children) {
-      out += '\n' + nodeToOutline(child, depth + 1)
+function parseFileData(raw: string): MindElixirData {
+  const trimmed = (raw ?? '').trim()
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed) as Partial<MindElixirData>
+      if (parsed.nodeData && typeof parsed.nodeData === 'object' && !Array.isArray(parsed.nodeData)) {
+        return {
+          nodeData: parsed.nodeData as NodeObj,
+          direction: typeof parsed.direction === 'number' ? parsed.direction : MindElixir.RIGHT,
+          arrows: parsed.arrows,
+          summaries: parsed.summaries,
+          theme: parsed.theme
+        }
+      }
+    } catch {
+      // fall through to outline parsing
     }
   }
-  return out
+  return { nodeData: outlineToNode(raw), direction: MindElixir.RIGHT }
+}
+
+/**
+ * Serialize MindElixirData to JSON, stripping the in-memory circular
+ * `parent` back-references Mind-Elixir adds to each NodeObj.
+ */
+function serializeData(data: MindElixirData): string {
+  return JSON.stringify(
+    data,
+    (key, value) => (key === 'parent' ? undefined : value),
+    2
+  )
 }
 
 export function MindmapEditor({
@@ -90,12 +106,13 @@ export function MindmapEditor({
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
   const lastSerialisedRef = useRef<string>('')
+  const lastDirectionRef = useRef<number>(MindElixir.RIGHT)
 
   // Compute the initial data structure once per mount — parent uses
   // key={filePath} on this component, so a file switch remounts us
   // with fresh `value` and no state carries over.
   const initialData = useMemo<MindElixirData>(() => {
-    return { nodeData: outlineToNode(value) }
+    return parseFileData(value)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -103,9 +120,12 @@ export function MindmapEditor({
     const el = containerRef.current
     if (!el) return
 
+    const direction = initialData.direction ?? MindElixir.RIGHT
+    lastDirectionRef.current = direction
+
     const options: Options = {
       el,
-      direction: MindElixir.SIDE,
+      direction,
       draggable: true,
       contextMenu: true,
       toolBar: true,
@@ -121,24 +141,37 @@ export function MindmapEditor({
 
     // Persist every structural / textual change back to disk. Mind-Elixir
     // fires `operation` for user-driven edits (add, remove, edit topic,
-    // move, etc.) but *not* for pure UI events like selection — so the
-    // dirty flag reflects actual document changes, not cursor movement.
+    // move, etc.) but *not* for pure UI events like selection.
     const handleOperation = (): void => {
       try {
         const data = me.getData()
-        const outline = nodeToOutline(data.nodeData)
-        if (outline === lastSerialisedRef.current) return
-        lastSerialisedRef.current = outline
-        onChangeRef.current(outline)
+        const serialised = serializeData(data)
+        if (serialised === lastSerialisedRef.current) return
+        lastSerialisedRef.current = serialised
+        onChangeRef.current(serialised)
       } catch (err) {
         console.warn('[Mindmap] serialisation error:', err)
       }
     }
     me.bus.addListener('operation', handleOperation)
 
+    // Detect direction changes made via the Mind-Elixir toolbar — those
+    // don't fire 'operation', so we check on mouseup.
+    const checkDirection = (): void => {
+      const inst = instanceRef.current
+      if (!inst) return
+      const currentDir = (inst as MindElixirInstance & { direction: number }).direction
+      if (typeof currentDir === 'number' && currentDir !== lastDirectionRef.current) {
+        lastDirectionRef.current = currentDir
+        handleOperation()
+      }
+    }
+    el.addEventListener('mouseup', checkDirection)
+
     return () => {
       try {
         me.bus.removeListener('operation', handleOperation)
+        el.removeEventListener('mouseup', checkDirection)
         me.destroy()
       } catch {
         // best-effort cleanup on unmount

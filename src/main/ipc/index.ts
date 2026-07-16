@@ -8,8 +8,10 @@ import type { PluginInstaller } from '../PluginInstaller'
 import type { FileSystemManager } from '../FileSystemManager'
 import type { AIService } from '../AIService'
 import { getSettings, setSettings, setPluginEnabled, updateAISettings } from '../SettingsStore'
+import { API_KEY_SENTINEL } from '@shared/constants'
 import type {
   AIRequest,
+  AIToolEvent,
   AppSettings,
   FileChangedEvent,
   NoteFormat,
@@ -133,6 +135,9 @@ export function registerIPC(
     }
   )
 
+  const escapeHtml = (s: string): string =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
   ipcMain.handle(IPC.FILE_EXPORT_HTML, async (_event, content: string, fileName: string) => {
     const result = await dialog.showSaveDialog({
       title: 'Export as HTML',
@@ -141,15 +146,18 @@ export function registerIPC(
     })
     if (result.canceled || !result.filePath) return null
 
-    // Use marked to convert markdown to HTML, wrap in a full HTML document
-    const { marked } = await import('marked')
-    const htmlBody = marked.parse(content, { async: false }) as string
+    const { marked, Renderer } = await import('marked')
+    // Strip raw HTML passthrough — note content could contain <script> tags
+    // or event-handler attributes that would execute when opened in a browser.
+    const renderer = new Renderer()
+    renderer.html = () => ''
+    const htmlBody = marked.parse(content, { async: false, renderer }) as string
     const fullHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${fileName}</title>
+<title>${escapeHtml(fileName)}</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #333; line-height: 1.7; }
   pre { background: #f5f5f5; padding: 16px; border-radius: 8px; overflow-x: auto; }
@@ -185,8 +193,10 @@ ${htmlBody}
       webPreferences: { sandbox: true }
     })
 
-    const { marked } = await import('marked')
-    const htmlBody = marked.parse(content, { async: false }) as string
+    const { marked, Renderer } = await import('marked')
+    const pdfRenderer = new Renderer()
+    pdfRenderer.html = () => ''
+    const htmlBody = marked.parse(content, { async: false, renderer: pdfRenderer }) as string
     const fullHtml = `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><style>
   body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 800px; margin: 0; padding: 20px; color: #333; line-height: 1.7; }
@@ -426,6 +436,13 @@ ${htmlBody}
   })
 
   ipcMain.handle(IPC.AI_TRANSCRIBE, async (_event, audioPath: string) => {
+    // Whitelist audio extensions to prevent arbitrary file exfiltration
+    // through the Whisper transcription endpoint.
+    const AUDIO_EXTENSIONS = ['.mp3', '.wav', '.ogg', '.m4a', '.mp4', '.webm', '.flac', '.aac']
+    const ext = audioPath.slice(audioPath.lastIndexOf('.')).toLowerCase()
+    if (!AUDIO_EXTENSIONS.includes(ext)) {
+      return { success: false, error: 'Only audio files can be transcribed' }
+    }
     try {
       const data = await aiService.transcribe(audioPath)
       return { success: true, data }
@@ -457,7 +474,13 @@ ${htmlBody}
   ipcMain.handle(
     IPC.AI_TEST_CONFIG,
     async (_event, config: Partial<AppSettings['ai']>) => {
-      return aiService.testConfig(config)
+      // Resolve the sentinel to the real stored key so testConfig exercises
+      // the actual credentials instead of the placeholder string.
+      const effective = { ...config }
+      if (effective.apiKey === API_KEY_SENTINEL) {
+        effective.apiKey = getSettings().ai.apiKey
+      }
+      return aiService.testConfig(effective)
     }
   )
 
@@ -478,31 +501,45 @@ ${htmlBody}
     const conversationId = request.conversationId || aiService.generateConversationId()
     const requestWithId: AIRequest = { ...request, conversationId }
     try {
-      for await (const chunk of aiService.generateStream(requestWithId)) {
-        sender.send(IPC.AI_STREAM_CHUNK, chunk)
+      for await (const chunk of aiService.generateStream(requestWithId, (toolEvt: AIToolEvent) => {
+        if (!sender.isDestroyed()) sender.send(IPC.AI_TOOL_EXECUTED, toolEvt)
+      })) {
+        if (!sender.isDestroyed()) sender.send(IPC.AI_STREAM_CHUNK, chunk)
       }
-      sender.send(IPC.AI_STREAM_DONE, { conversationId })
+      if (!sender.isDestroyed()) sender.send(IPC.AI_STREAM_DONE, { conversationId })
     } catch (err) {
-      sender.send(
-        IPC.AI_STREAM_ERROR,
-        err instanceof Error ? err.message : String(err)
-      )
+      if (!sender.isDestroyed()) {
+        sender.send(IPC.AI_STREAM_ERROR, err instanceof Error ? err.message : String(err))
+      }
     }
   })
 
   // ============ Settings IPC ============
 
+  const maskSettings = (s: AppSettings): AppSettings => ({
+    ...s,
+    ai: { ...s.ai, apiKey: s.ai.apiKey ? API_KEY_SENTINEL : '' }
+  })
+
   ipcMain.handle(IPC.SETTINGS_GET, async () => {
-    return getSettings()
+    // Return a masked copy so the plaintext API key never enters renderer
+    // memory where injected scripts could read it.
+    return maskSettings(getSettings())
   })
 
   ipcMain.handle(IPC.SETTINGS_SET, async (_event, partial: Partial<AppSettings>) => {
-    const updated = setSettings(partial)
-    // If workspacePath changed, update the FileSystemManager
-    if (partial.workspacePath) {
-      fsManager.setWorkspacePath(partial.workspacePath)
+    // If the renderer echoed the sentinel back unchanged, strip it so we
+    // keep the real key on disk rather than overwriting it.
+    let effective = partial
+    if (effective.ai?.apiKey === API_KEY_SENTINEL) {
+      const { apiKey: _stripped, ...aiRest } = effective.ai
+      effective = { ...effective, ai: aiRest as AppSettings['ai'] }
     }
-    return updated
+    const updated = setSettings(effective)
+    if (effective.workspacePath) {
+      fsManager.setWorkspacePath(effective.workspacePath)
+    }
+    return maskSettings(updated)
   })
 
   // ============ Dialog IPC ============

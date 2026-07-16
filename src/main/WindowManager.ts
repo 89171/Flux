@@ -1,5 +1,6 @@
 import { BrowserWindow, screen, type BrowserWindowConstructorOptions } from 'electron'
-import { join } from 'path'
+import { join, resolve } from 'path'
+import { existsSync } from 'fs'
 import AutoLaunch from 'auto-launch'
 import {
   NOTE_WINDOW_DEFAULT_WIDTH,
@@ -51,6 +52,18 @@ export class WindowManager {
     })
   }
 
+  /** Resolves the app icon PNG for window decoration (Windows/Linux) and
+   *  macOS dev-mode Dock. Returns undefined if the file doesn't exist yet. */
+  resolveIconPath(): string | undefined {
+    // Dev: __dirname is out/main/ — step up two levels to project root
+    const devPath  = resolve(__dirname, '../../build/icon.png')
+    // Prod: electron-builder copies extraResources; icon.png lands in Resources/
+    const prodPath = resolve(process.resourcesPath ?? '', 'icon.png')
+    if (existsSync(devPath))  return devPath
+    if (existsSync(prodPath)) return prodPath
+    return undefined
+  }
+
   createMainWindow(): BrowserWindow {
     const mainWindow = new BrowserWindow({
       width: 1200,
@@ -61,6 +74,7 @@ export class WindowManager {
       trafficLightPosition: { x: 12, y: 12 },
       show: false,
       autoHideMenuBar: true,
+      ...(this.resolveIconPath() ? { icon: this.resolveIconPath() } : {}),
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
         // Security posture: sandbox the renderer, isolate contexts, and

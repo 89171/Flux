@@ -24,7 +24,7 @@ import {
   useState,
   type CSSProperties
 } from 'react'
-import { FileImage, FileCode } from 'lucide-react'
+import { FileImage, FileCode, Code, Eye, Columns } from 'lucide-react'
 import mermaid from 'mermaid'
 import CodeMirrorEditor from './CodeMirrorEditor'
 
@@ -65,6 +65,7 @@ export function MermaidEditor({
   const [svg, setSvg] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
   const [isExporting, setIsExporting] = useState(false)
+  const [viewMode, setViewMode] = useState<'both' | 'editor' | 'preview'>('both')
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
@@ -226,6 +227,29 @@ export function MermaidEditor({
         >
           Mermaid
         </span>
+        {/* View mode toggles */}
+        <button
+          onClick={() => setViewMode('editor')}
+          title="仅编辑"
+          style={{ ...toolbarBtnStyle, background: viewMode === 'editor' ? 'var(--bg-active)' : 'transparent', color: viewMode === 'editor' ? 'var(--text-primary)' : 'var(--text-secondary)' }}
+        >
+          <Code size={13} />
+        </button>
+        <button
+          onClick={() => setViewMode('both')}
+          title="分屏"
+          style={{ ...toolbarBtnStyle, background: viewMode === 'both' ? 'var(--bg-active)' : 'transparent', color: viewMode === 'both' ? 'var(--text-primary)' : 'var(--text-secondary)' }}
+        >
+          <Columns size={13} />
+        </button>
+        <button
+          onClick={() => setViewMode('preview')}
+          title="仅预览"
+          style={{ ...toolbarBtnStyle, background: viewMode === 'preview' ? 'var(--bg-active)' : 'transparent', color: viewMode === 'preview' ? 'var(--text-primary)' : 'var(--text-secondary)' }}
+        >
+          <Eye size={13} />
+        </button>
+        <div style={{ width: 1, height: 16, background: 'var(--border-light)', margin: '0 4px' }} />
         <button
           onClick={handleExportSvg}
           disabled={!svg}
@@ -247,34 +271,38 @@ export function MermaidEditor({
       </div>
 
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <div
-          style={{
-            flex: 1,
-            minWidth: 200,
-            height: '100%',
-            borderRight: '1px solid var(--border-light)',
-            boxSizing: 'border-box',
-            overflow: 'hidden'
-          }}
-        >
-          <CodeMirrorEditor
-            value={value}
-            onChange={onChangeRef.current}
-            fileName="diagram.mmd"
-            fontSize={13}
-          />
-        </div>
-        <div
-          style={{
-            flex: 1,
-            minWidth: 200,
-            height: '100%',
-            overflow: 'auto',
-            background: 'var(--bg-secondary)'
-          }}
-        >
-          {previewNode}
-        </div>
+        {viewMode !== 'preview' && (
+          <div
+            style={{
+              flex: 1,
+              minWidth: 200,
+              height: '100%',
+              borderRight: viewMode === 'both' ? '1px solid var(--border-light)' : 'none',
+              boxSizing: 'border-box',
+              overflow: 'hidden'
+            }}
+          >
+            <CodeMirrorEditor
+              value={value}
+              onChange={onChangeRef.current}
+              fileName="diagram.mmd"
+              fontSize={13}
+            />
+          </div>
+        )}
+        {viewMode !== 'editor' && (
+          <div
+            style={{
+              flex: 1,
+              minWidth: 200,
+              height: '100%',
+              overflow: 'auto',
+              background: 'var(--bg-secondary)'
+            }}
+          >
+            {previewNode}
+          </div>
+        )}
       </div>
     </div>
   )

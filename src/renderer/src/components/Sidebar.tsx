@@ -450,11 +450,6 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   // an outside click.
   const newFileAnchorRef = useRef<HTMLElement | null>(null)
 
-  // Load plugins on mount so we know which file types are available
-  useEffect(() => {
-    loadPlugins()
-  }, [loadPlugins])
-
   /**
    * "New File" dropdown entries. Data-driven from active format plugins —
    * one entry per plugin (its primaryExtension, defaulting to

@@ -268,10 +268,22 @@ export interface AIResponse {
   }
 }
 
+export interface AIToolEvent {
+  conversationId: string
+  tool: string
+  args: Record<string, unknown>
+  result: {
+    success: boolean
+    filePath?: string
+    error?: string
+  }
+}
+
 export interface AIMessage {
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'tool'
   content: string
   timestamp: number
+  toolEvent?: AIToolEvent
 }
 
 export interface AIConversation {

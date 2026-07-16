@@ -20,12 +20,15 @@ import {
   Image,
   Music,
   Check,
+  Copy,
   Trash2,
   Zap,
-  Square
+  Square,
+  FilePlus
 } from 'lucide-react'
 import { useAIStore } from '../stores/aiStore'
 import { useFileStore } from '../stores/fileStore'
+import type { NoteFile } from '@shared/types'
 
 const suggestions = [
   'Summarize this document',
@@ -60,8 +63,19 @@ export function AIPanel() {
   const currentFile = useFileStore((s) => s.currentFile)
   const currentContent = useFileStore((s) => s.currentContent)
   const setContent = useFileStore((s) => s.setContent)
+  const openFile = useFileStore((s) => s.openFile)
+  const tree = useFileStore((s) => s.tree)
 
   const [input, setInput] = useState('')
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
+
+  const handleCopy = useCallback((content: string, idx: number) => {
+    navigator.clipboard.writeText(content).then(() => {
+      setCopiedIdx(idx)
+      setTimeout(() => setCopiedIdx((prev) => (prev === idx ? null : prev)), 1500)
+    })
+  }, [])
+
   // When true, AI chunks stream directly into the note editor — the
   // user sees text appear in the file in real time. When false, chunks
   // only appear in the AI panel; Replace/Append applies them after.
@@ -71,6 +85,31 @@ export function AIPanel() {
   const preStreamContentRef = useRef('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const handleOpenCreatedFile = useCallback(
+    async (filePath: string) => {
+      const findInTree = (nodes: NoteFile[]): NoteFile | null => {
+        for (const n of nodes) {
+          if (n.path === filePath) return n
+          if (n.children) {
+            const found = findInTree(n.children)
+            if (found) return found
+          }
+        }
+        return null
+      }
+      const found = findInTree(tree)
+      if (found) {
+        openFile(found)
+        return
+      }
+      // Tree may not have refreshed yet — fetch it then retry
+      const freshTree = await window.flux.file.getTree()
+      const foundFresh = findInTree(freshTree)
+      if (foundFresh) openFile(foundFresh)
+    },
+    [tree, openFile]
+  )
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -226,32 +265,90 @@ export function AIPanel() {
             </button>
           </div>
 
-          {messages.map((msg, idx) => (
-            <div key={idx} className={`ai-message ${msg.role}`}>
-              <div className="role">{msg.role === 'user' ? 'You' : 'AI Assistant'}</div>
-              <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</div>
-              {msg.role === 'assistant' && (
-                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+          {messages.map((msg, idx) => {
+            /* ── Tool result card (file creation) ── */
+            if (msg.role === 'tool' && msg.toolEvent) {
+              const { result } = msg.toolEvent
+              return (
+                <div
+                  key={idx}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '6px 10px',
+                    margin: '4px 0',
+                    borderRadius: 'var(--radius-md)',
+                    background: result.success ? 'var(--bg-secondary)' : '#fff0f0',
+                    border: `1px solid ${result.success ? 'var(--border-color)' : '#ffcdd2'}`,
+                    fontSize: 'var(--font-size-xs)',
+                    color: result.success ? 'var(--text-secondary)' : '#c62828'
+                  }}
+                >
+                  {result.success ? (
+                    <FilePlus size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                  ) : (
+                    <X size={13} style={{ flexShrink: 0 }} />
+                  )}
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {result.success ? result.filePath : result.error}
+                  </span>
+                  {result.success && result.filePath && (
+                    <button
+                      className="btn btn-ghost"
+                      style={{ fontSize: 'var(--font-size-xs)', padding: '2px 8px', flexShrink: 0 }}
+                      onClick={() => handleOpenCreatedFile(result.filePath!)}
+                    >
+                      Open
+                    </button>
+                  )}
+                </div>
+              )
+            }
+
+            /* ── User / Assistant messages ── */
+            return (
+              <div key={idx} className={`ai-message ${msg.role}`}>
+                {/* Header row: role label + copy button */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <div className="role" style={{ marginBottom: 0 }}>
+                    {msg.role === 'user' ? 'You' : 'AI Assistant'}
+                  </div>
                   <button
-                    className="btn btn-primary"
-                    style={{ fontSize: 'var(--font-size-xs)', padding: '3px 8px', gap: 4 }}
-                    onClick={() => handleApplyToNote(msg.content, 'replace')}
-                    title="Replace current note content"
+                    className="btn-icon"
+                    style={{ width: 20, height: 20, padding: 0, opacity: 0.6, flexShrink: 0 }}
+                    onClick={() => handleCopy(msg.content, idx)}
+                    title="Copy"
                   >
-                    <Check size={12} /> Replace
-                  </button>
-                  <button
-                    className="btn btn-ghost"
-                    style={{ fontSize: 'var(--font-size-xs)', padding: '3px 8px', gap: 4, border: '1px solid var(--border-color)' }}
-                    onClick={() => handleApplyToNote(msg.content, 'append')}
-                    title="Append to current note"
-                  >
-                    <Check size={12} /> Append
+                    {copiedIdx === idx
+                      ? <Check size={12} style={{ color: 'var(--accent)' }} />
+                      : <Copy size={12} />}
                   </button>
                 </div>
-              )}
-            </div>
-          ))}
+                <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</div>
+                {msg.role === 'assistant' && (
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                    <button
+                      className="btn btn-primary"
+                      style={{ fontSize: 'var(--font-size-xs)', padding: '3px 8px', gap: 4 }}
+                      onClick={() => handleApplyToNote(msg.content, 'replace')}
+                      title="Replace current note content"
+                    >
+                      <Check size={12} /> Replace
+                    </button>
+                    <button
+                      className="btn btn-ghost"
+                      style={{ fontSize: 'var(--font-size-xs)', padding: '3px 8px', gap: 4, border: '1px solid var(--border-color)' }}
+                      onClick={() => handleApplyToNote(msg.content, 'append')}
+                      title="Append to current note"
+                    >
+                      <Check size={12} /> Append
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
 
           {/* Loading / streaming state */}
           {isGenerating && (

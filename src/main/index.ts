@@ -39,8 +39,8 @@ async function bootstrap(): Promise<void> {
   // Create WindowManager
   windowManager = new WindowManager(is.dev)
 
-  // Create AIService
-  aiService = new AIService(pluginManager)
+  // Create AIService (pass fsManager so tool calls can create files)
+  aiService = new AIService(pluginManager, fsManager)
 
   // Configure AI with saved settings
   aiService.configure(settings.ai)
@@ -129,7 +129,10 @@ function buildMenu(): void {
         { type: 'separator' },
         {
           label: 'Preferences...',
-          accelerator: 'CmdOrControl+,',
+          // No accelerator here — CmdOrControl+, is handled in the renderer
+          // so macOS doesn't intercept the comma key at the OS level.
+          // Registering it as a menu accelerator causes false triggers when
+          // Chinese IME converts ',' → '，' (full-width comma).
           click: () => sendMenuAction('settings')
         },
         { type: 'separator' },
@@ -293,6 +296,12 @@ if (!gotTheLock) {
     bootstrap()
       .then(() => {
         buildMenu()
+        // Set macOS Dock icon — electron-builder only wires the .icns into the
+        // .app bundle for production builds; in dev we set it programmatically.
+        if (process.platform === 'darwin' && app.dock) {
+          const iconPath = windowManager?.resolveIconPath()
+          if (iconPath) app.dock.setIcon(iconPath)
+        }
       })
       .catch((err) => {
         console.error('Failed to bootstrap application:', err)

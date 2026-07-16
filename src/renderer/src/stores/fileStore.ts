@@ -12,6 +12,8 @@ interface FileState {
   isDirty: boolean
   /** True when a save was refused because the file changed underneath us. */
   hasConflict: boolean
+  /** Non-null when a file read or save operation failed visibly. */
+  fileError: string | null
   workspacePath: string
   loadTree: () => Promise<void>
   applyTreeUpdate: (tree: NoteFile[]) => void
@@ -19,6 +21,7 @@ interface FileState {
   setContent: (content: string) => void
   saveFile: () => Promise<void>
   reloadCurrent: () => Promise<void>
+  clearError: () => void
   applyExternalChange: (path: string, content: string, mtime: number) => void
   createFile: (parentPath: string, name: string, isDir: boolean) => Promise<void>
   deleteFile: (path: string) => Promise<void>
@@ -26,6 +29,8 @@ interface FileState {
   moveFile: (sourcePath: string, targetDir: string) => Promise<void>
   openFolder: () => Promise<void>
 }
+
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null
 
 export const useFileStore = create<FileState>((set, get) => ({
   tree: [],
@@ -35,14 +40,14 @@ export const useFileStore = create<FileState>((set, get) => ({
   isLoading: false,
   isDirty: false,
   hasConflict: false,
+  fileError: null,
   workspacePath: '',
 
   loadTree: async () => {
     set({ isLoading: true })
     try {
       const tree = await window.flux.file.getTree()
-      const treeArray = Array.isArray(tree) ? tree : (tree as NoteFile).children || []
-      set({ tree: treeArray, isLoading: false })
+      set({ tree, isLoading: false })
     } catch (err) {
       console.error('Failed to load file tree:', err)
       set({ tree: [], isLoading: false })
@@ -85,7 +90,8 @@ export const useFileStore = create<FileState>((set, get) => ({
         currentContent: content,
         currentMtime: mtime,
         isDirty: false,
-        hasConflict: false
+        hasConflict: false,
+        fileError: null
       })
     } catch (err) {
       console.error('Failed to open file:', err)
@@ -94,16 +100,40 @@ export const useFileStore = create<FileState>((set, get) => ({
         currentContent: '',
         currentMtime: null,
         isDirty: false,
-        hasConflict: false
+        hasConflict: false,
+        fileError: `Failed to read "${file.name}": ${err instanceof Error ? err.message : String(err)}`
       })
     }
   },
 
-  setContent: (content) => set({ currentContent: content, isDirty: true }),
+  setContent: (content) => {
+    set({ currentContent: content, isDirty: true })
+    // Debounced autosave — 2 s after the last keystroke.
+    if (autosaveTimer) clearTimeout(autosaveTimer)
+    autosaveTimer = setTimeout(async () => {
+      autosaveTimer = null
+      const { currentFile, currentContent: latest, currentMtime, hasConflict } = get()
+      if (!currentFile || hasConflict) return
+      try {
+        const result = await window.flux.file.writeGuarded(currentFile.path, latest, currentMtime)
+        if (result.ok) {
+          set({ isDirty: false, currentMtime: result.mtime, hasConflict: false })
+        } else {
+          set({ hasConflict: true })
+        }
+      } catch {
+        // Silent — user can still save manually with Cmd+S
+      }
+    }, 2000)
+  },
 
   saveFile: async () => {
     const { currentFile, currentContent, currentMtime } = get()
     if (!currentFile) return
+    if (autosaveTimer) {
+      clearTimeout(autosaveTimer)
+      autosaveTimer = null
+    }
     try {
       const result = await window.flux.file.writeGuarded(
         currentFile.path,
@@ -111,11 +141,8 @@ export const useFileStore = create<FileState>((set, get) => ({
         currentMtime
       )
       if (result.ok) {
-        set({ isDirty: false, currentMtime: result.mtime, hasConflict: false })
+        set({ isDirty: false, currentMtime: result.mtime, hasConflict: false, fileError: null })
       } else {
-        // Another window wrote to this file after we loaded it. We keep the
-        // user's edits in the buffer and expose the conflict so the UI can
-        // offer "reload" or "overwrite" — do NOT silently overwrite.
         console.warn(
           `Save refused: file changed externally (disk mtime ${result.diskMtime}). Local edits retained.`
         )
@@ -123,6 +150,7 @@ export const useFileStore = create<FileState>((set, get) => ({
       }
     } catch (err) {
       console.error('Failed to save file:', err)
+      set({ fileError: `Failed to save "${currentFile.name}": ${err instanceof Error ? err.message : String(err)}` })
     }
   },
 
@@ -135,12 +163,16 @@ export const useFileStore = create<FileState>((set, get) => ({
         currentContent: content,
         currentMtime: mtime,
         isDirty: false,
-        hasConflict: false
+        hasConflict: false,
+        fileError: null
       })
     } catch (err) {
       console.error('Failed to reload current file:', err)
+      set({ fileError: `Failed to reload "${currentFile.name}": ${err instanceof Error ? err.message : String(err)}` })
     }
   },
+
+  clearError: () => set({ fileError: null }),
 
   /**
    * Fold an external write (from another window / autosave broadcast) into

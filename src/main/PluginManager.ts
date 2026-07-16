@@ -52,7 +52,15 @@ export function resolvePluginIcon(
     icon.endsWith('.webp') ||
     icon.endsWith('.gif')
   if (!looksLikePath) return icon
-  return `file://${join(pluginDir, icon)}`
+  // Guard against traversal — same containment check as resolvePluginEditorEntry.
+  const dirAbs = pathResolve(pluginDir)
+  const target = pathResolve(dirAbs, icon)
+  const rel = relative(dirAbs, target)
+  if (rel.startsWith('..') || pathResolve(dirAbs, rel) !== target) {
+    console.warn(`[PluginManager] icon path escapes plugin dir; ignoring: ${icon}`)
+    return undefined
+  }
+  return `file://${target}`
 }
 
 /**

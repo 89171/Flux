@@ -188,15 +188,23 @@ function formatLabel(format?: NoteFormat): string {
   }
 }
 
-const DEFAULT_FONT_SIZE = 14
+const DEFAULT_FONT_SIZE = 16
 const MIN_FONT_SIZE = 10
 const MAX_FONT_SIZE = 28
 const FONT_SIZE_STEP = 2
 
 export default function Editor(): JSX.Element {
-  const { currentFile, currentContent, currentMtime, setContent, saveFile, isDirty } =
-    useFileStore()
-  const { openPanel, isGenerating } = useAIStore()
+  const currentFile = useFileStore((s) => s.currentFile)
+  const currentContent = useFileStore((s) => s.currentContent)
+  const currentMtime = useFileStore((s) => s.currentMtime)
+  const setContent = useFileStore((s) => s.setContent)
+  const saveFile = useFileStore((s) => s.saveFile)
+  const isDirty = useFileStore((s) => s.isDirty)
+  const hasConflict = useFileStore((s) => s.hasConflict)
+  const reloadCurrent = useFileStore((s) => s.reloadCurrent)
+  const fileError = useFileStore((s) => s.fileError)
+  const clearError = useFileStore((s) => s.clearError)
+  const isGenerating = useAIStore((s) => s.isGenerating)
   const formatMap = usePluginStore((s) => s.formatMap)
 
   const [isDragOver, setIsDragOver] = useState(false)
@@ -224,6 +232,7 @@ export default function Editor(): JSX.Element {
   // Keyboard shortcuts: Cmd/Ctrl+S to save, Cmd/Ctrl+/-/0 to zoom, Cmd/Ctrl+F/H find/replace
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.isComposing || e.keyCode === 229) return
       const mod = e.metaKey || e.ctrlKey
       if (mod && e.key === 's') {
         e.preventDefault()
@@ -315,11 +324,10 @@ export default function Editor(): JSX.Element {
     [formatMap]
   )
 
-  // AI Generate handler
-  const handleAIGenerate = useCallback(async () => {
-    openPanel()
-    // The AI panel itself handles prompting; opening it is sufficient.
-  }, [openPanel])
+  // AI Generate handler — dispatches up to App.tsx which owns aiPanelOpen
+  const handleAIGenerate = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('flux:toggle-ai'))
+  }, [])
 
   // Pin to Desktop handler - opens a pinned note window
   const handlePin = useCallback(async () => {
@@ -768,6 +776,86 @@ export default function Editor(): JSX.Element {
           </button>
         </div>
       </div>
+
+      {/* Conflict banner */}
+      {hasConflict && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '8px 16px',
+            background: 'var(--bg-warning, #fff8e1)',
+            borderBottom: '1px solid var(--border-warning, #f9a825)',
+            fontSize: 13,
+            color: 'var(--text-primary)',
+            flexShrink: 0
+          }}
+        >
+          <span style={{ flex: 1 }}>
+            File was modified externally. Your local edits are preserved.
+          </span>
+          <button
+            onClick={reloadCurrent}
+            style={{
+              padding: '3px 10px',
+              borderRadius: 4,
+              border: '1px solid var(--border-color)',
+              background: 'var(--bg-secondary)',
+              cursor: 'pointer',
+              fontSize: 12
+            }}
+          >
+            Reload from disk
+          </button>
+          <button
+            onClick={saveFile}
+            style={{
+              padding: '3px 10px',
+              borderRadius: 4,
+              border: 'none',
+              background: 'var(--accent)',
+              color: '#fff',
+              cursor: 'pointer',
+              fontSize: 12
+            }}
+          >
+            Overwrite with mine
+          </button>
+        </div>
+      )}
+
+      {/* Error banner */}
+      {fileError && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '8px 16px',
+            background: 'var(--bg-error, #ffebee)',
+            borderBottom: '1px solid var(--border-error, #ef9a9a)',
+            fontSize: 13,
+            color: 'var(--text-primary)',
+            flexShrink: 0
+          }}
+        >
+          <span style={{ flex: 1 }}>{fileError}</span>
+          <button
+            onClick={clearError}
+            style={{
+              padding: '3px 10px',
+              borderRadius: 4,
+              border: '1px solid var(--border-color)',
+              background: 'var(--bg-secondary)',
+              cursor: 'pointer',
+              fontSize: 12
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Editor content area */}
       <div

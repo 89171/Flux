@@ -152,7 +152,22 @@ export function WhiteboardEditor({
       { source: 'user', scope: 'document' }
     )
     return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current)
+      // Flush any pending debounced change before unmounting so the last
+      // stroke isn't lost when the user switches files quickly.
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current)
+        debounceRef.current = null
+        try {
+          const snapshot = getSnapshot(store)
+          const serialised = JSON.stringify(snapshot)
+          if (serialised !== lastSerialisedRef.current) {
+            lastSerialisedRef.current = serialised
+            onChangeRef.current(serialised)
+          }
+        } catch {
+          // best-effort
+        }
+      }
       unlisten()
     }
   }, [store])

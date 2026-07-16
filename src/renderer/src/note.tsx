@@ -229,6 +229,7 @@ function NoteApp() {
   // Keyboard shortcut: Cmd/Ctrl+S to save immediately, Cmd/Ctrl+/-/0 to zoom
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.isComposing || e.keyCode === 229) return
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault()
         if (saveTimerRef.current) {

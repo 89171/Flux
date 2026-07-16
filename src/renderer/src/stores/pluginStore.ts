@@ -24,6 +24,14 @@ interface PluginState {
   openDevGuide: () => Promise<void>
 }
 
+async function refreshPlugins(set: (state: Partial<PluginState>) => void): Promise<void> {
+  const [plugins, formatMap] = await Promise.all([
+    window.flux.plugin.list(),
+    window.flux.plugin.getFormatMap()
+  ])
+  set({ plugins, formatMap })
+}
+
 export const usePluginStore = create<PluginState>((set) => ({
   plugins: [],
   formatMap: {},
@@ -52,11 +60,7 @@ export const usePluginStore = create<PluginState>((set) => ({
   activatePlugin: async (id) => {
     try {
       await window.flux.plugin.activate(id)
-      const [plugins, formatMap] = await Promise.all([
-        window.flux.plugin.list(),
-        window.flux.plugin.getFormatMap()
-      ])
-      set({ plugins, formatMap })
+      await refreshPlugins(set)
     } catch (err) {
       console.error('Failed to activate plugin:', err)
     }
@@ -64,11 +68,7 @@ export const usePluginStore = create<PluginState>((set) => ({
   deactivatePlugin: async (id) => {
     try {
       await window.flux.plugin.deactivate(id)
-      const [plugins, formatMap] = await Promise.all([
-        window.flux.plugin.list(),
-        window.flux.plugin.getFormatMap()
-      ])
-      set({ plugins, formatMap })
+      await refreshPlugins(set)
     } catch (err) {
       console.error('Failed to deactivate plugin:', err)
     }
@@ -76,14 +76,7 @@ export const usePluginStore = create<PluginState>((set) => ({
   setPluginEnabled: async (id, enabled) => {
     try {
       const result = await window.flux.plugin.setEnabled(id, enabled)
-      // Refresh both lists — activation/deactivation changes plugin status
-      // and format-map bindings; the market UI and file tree both consume
-      // these, so we sync them together.
-      const [plugins, formatMap] = await Promise.all([
-        window.flux.plugin.list(),
-        window.flux.plugin.getFormatMap()
-      ])
-      set({ plugins, formatMap })
+      await refreshPlugins(set)
       return result.success
         ? { success: true }
         : { success: false, error: result.error }
@@ -96,8 +89,8 @@ export const usePluginStore = create<PluginState>((set) => ({
     try {
       const result = await window.flux.plugin.install()
       if (result.success) {
-        const plugins = await window.flux.plugin.list()
-        set({ plugins, isInstalling: false, installMessage: `Installed: ${result.plugin?.name}` })
+        await refreshPlugins(set)
+        set({ isInstalling: false, installMessage: `Installed: ${result.plugin?.name}` })
         return { success: true }
       } else if (!result.canceled) {
         set({ isInstalling: false, installMessage: result.error })
@@ -115,8 +108,8 @@ export const usePluginStore = create<PluginState>((set) => ({
     try {
       const result = await window.flux.plugin.loadLocal(path)
       if (result.success) {
-        const plugins = await window.flux.plugin.list()
-        set({ plugins, isInstalling: false, installMessage: `Installed: ${result.plugin?.name}` })
+        await refreshPlugins(set)
+        set({ isInstalling: false, installMessage: `Installed: ${result.plugin?.name}` })
         return { success: true }
       }
       set({ isInstalling: false, installMessage: result.error })
@@ -130,8 +123,7 @@ export const usePluginStore = create<PluginState>((set) => ({
     try {
       const result = await window.flux.plugin.uninstall(id)
       if (result.success) {
-        const plugins = await window.flux.plugin.list()
-        set({ plugins })
+        await refreshPlugins(set)
         return { success: true }
       }
       return { success: false, error: result.error }

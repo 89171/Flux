@@ -11,8 +11,9 @@
  * users don't wonder why nothing renders offline.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import plantumlEncoder from 'plantuml-encoder'
+import { Code, Eye, Columns } from 'lucide-react'
 
 export interface PlantUmlEditorProps {
   value: string
@@ -29,6 +30,7 @@ export function PlantUmlEditor({
 }: PlantUmlEditorProps): JSX.Element {
   const [source, setSource] = useState(value)
   const [debouncedSource, setDebouncedSource] = useState(value)
+  const [viewMode, setViewMode] = useState<'both' | 'editor' | 'preview'>('both')
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
@@ -74,72 +76,129 @@ export function PlantUmlEditor({
         width: '100%',
         height: '100%',
         display: 'flex',
+        flexDirection: 'column',
         background: 'var(--bg-primary)'
       }}
     >
-      <textarea
-        value={source}
-        onChange={(e) => handleChange(e.target.value)}
-        spellCheck={false}
-        placeholder={'@startuml\nAlice -> Bob: Hello\n@enduml'}
-        style={{
-          flex: 1,
-          minWidth: 200,
-          height: '100%',
-          border: 'none',
-          outline: 'none',
-          resize: 'none',
-          padding: 16,
-          fontFamily: 'var(--font-mono)',
-          fontSize: 13,
-          lineHeight: 1.6,
-          color: 'var(--text-primary)',
-          background: 'var(--bg-primary)',
-          borderRight: '1px solid var(--border-light)',
-          boxSizing: 'border-box',
-          tabSize: 2
-        }}
-      />
+      {/* Toolbar */}
       <div
         style={{
-          flex: 1,
-          minWidth: 200,
-          height: '100%',
-          overflow: 'auto',
-          background: 'var(--bg-secondary)',
           display: 'flex',
-          alignItems: previewUrl ? 'flex-start' : 'center',
-          justifyContent: 'center',
-          padding: 16,
-          boxSizing: 'border-box'
+          alignItems: 'center',
+          gap: 4,
+          padding: '6px 12px',
+          borderBottom: '1px solid var(--border-light)',
+          background: 'var(--bg-secondary)',
+          flexShrink: 0
         }}
       >
-        {previewUrl ? (
-          <img
-            src={previewUrl}
-            alt="PlantUML preview"
-            style={{ maxWidth: '100%', display: 'block' }}
-            // The PlantUML server occasionally 500s on malformed input —
-            // we swallow the broken-image icon so the panel stays clean.
-            onError={(e) => {
-              ;(e.target as HTMLImageElement).style.visibility = 'hidden'
-            }}
-            onLoad={(e) => {
-              ;(e.target as HTMLImageElement).style.visibility = 'visible'
+        <span style={{ fontSize: 11, color: 'var(--text-tertiary)', marginRight: 'auto', fontFamily: 'var(--font-mono)' }}>
+          PlantUML
+        </span>
+        <button
+          onClick={() => setViewMode('editor')}
+          title="仅编辑"
+          style={{ ...toolbarBtnStyle, background: viewMode === 'editor' ? 'var(--bg-active)' : 'transparent', color: viewMode === 'editor' ? 'var(--text-primary)' : 'var(--text-secondary)' }}
+        >
+          <Code size={13} />
+        </button>
+        <button
+          onClick={() => setViewMode('both')}
+          title="分屏"
+          style={{ ...toolbarBtnStyle, background: viewMode === 'both' ? 'var(--bg-active)' : 'transparent', color: viewMode === 'both' ? 'var(--text-primary)' : 'var(--text-secondary)' }}
+        >
+          <Columns size={13} />
+        </button>
+        <button
+          onClick={() => setViewMode('preview')}
+          title="仅预览"
+          style={{ ...toolbarBtnStyle, background: viewMode === 'preview' ? 'var(--bg-active)' : 'transparent', color: viewMode === 'preview' ? 'var(--text-primary)' : 'var(--text-secondary)' }}
+        >
+          <Eye size={13} />
+        </button>
+      </div>
+
+      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+        {viewMode !== 'preview' && (
+          <textarea
+            value={source}
+            onChange={(e) => handleChange(e.target.value)}
+            spellCheck={false}
+            placeholder={'@startuml\nAlice -> Bob: Hello\n@enduml'}
+            style={{
+              flex: 1,
+              minWidth: 200,
+              height: '100%',
+              border: 'none',
+              outline: 'none',
+              resize: 'none',
+              padding: 16,
+              fontFamily: 'var(--font-mono)',
+              fontSize: 13,
+              lineHeight: 1.6,
+              color: 'var(--text-primary)',
+              background: 'var(--bg-primary)',
+              borderRight: viewMode === 'both' ? '1px solid var(--border-light)' : 'none',
+              boxSizing: 'border-box',
+              tabSize: 2
             }}
           />
-        ) : (
-          <div style={{ color: 'var(--text-tertiary)', fontSize: 13, textAlign: 'center' }}>
-            在左侧输入 PlantUML 语法开始预览
-            <br />
-            <span style={{ fontSize: 11, opacity: 0.7 }}>
-              预览通过 plantuml.com 服务器渲染，需要网络连接
-            </span>
+        )}
+        {viewMode !== 'editor' && (
+          <div
+            style={{
+              flex: 1,
+              minWidth: 200,
+              height: '100%',
+              overflow: 'auto',
+              background: 'var(--bg-secondary)',
+              display: 'flex',
+              alignItems: previewUrl ? 'flex-start' : 'center',
+              justifyContent: 'center',
+              padding: 16,
+              boxSizing: 'border-box'
+            }}
+          >
+            {previewUrl ? (
+              <img
+                src={previewUrl}
+                alt="PlantUML preview"
+                style={{ maxWidth: '100%', display: 'block' }}
+                onError={(e) => {
+                  ;(e.target as HTMLImageElement).style.visibility = 'hidden'
+                }}
+                onLoad={(e) => {
+                  ;(e.target as HTMLImageElement).style.visibility = 'visible'
+                }}
+              />
+            ) : (
+              <div style={{ color: 'var(--text-tertiary)', fontSize: 13, textAlign: 'center' }}>
+                在左侧输入 PlantUML 语法开始预览
+                <br />
+                <span style={{ fontSize: 11, opacity: 0.7 }}>
+                  预览通过 plantuml.com 服务器渲染，需要网络连接
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>
     </div>
   )
+}
+
+const toolbarBtnStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  padding: '4px 8px',
+  border: '1px solid var(--border-color)',
+  borderRadius: 4,
+  background: 'transparent',
+  color: 'var(--text-secondary)',
+  cursor: 'pointer',
+  fontSize: 12,
+  fontFamily: 'var(--font-sans)'
 }
 
 export default PlantUmlEditor

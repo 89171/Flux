@@ -5,6 +5,7 @@ import type {
   PluginInfo,
   AIRequest,
   AIResponse,
+  AIToolEvent,
   AppSettings,
   FormatBinding,
   FileReadMetaResult,
@@ -16,7 +17,7 @@ import type {
 
 const api = {
   file: {
-    getTree: (): Promise<NoteFile> => ipcRenderer.invoke(IPC.FILE_TREE),
+    getTree: (): Promise<NoteFile[]> => ipcRenderer.invoke(IPC.FILE_TREE),
     read: (path: string): Promise<string> => ipcRenderer.invoke(IPC.FILE_READ, path),
     readMeta: (path: string): Promise<FileReadMetaResult> =>
       ipcRenderer.invoke(IPC.FILE_READ_META, path),
@@ -101,15 +102,16 @@ const api = {
     testConfig: (config: Partial<{ provider: string; apiKey: string; model: string; baseUrl: string }>): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke(IPC.AI_TEST_CONFIG, config),
     /**
      * Start a streaming generation. Calls onChunk for each text chunk,
-     * onDone when complete, onError on failure. Returns a cancel
-     * function that removes the IPC listeners (does NOT abort the
-     * server-side request — that requires a separate ai.cancel call).
+     * onDone when complete, onError on failure, and optionally
+     * onToolExecuted when the AI executes a file-creation tool call.
+     * Returns a cancel function that removes all IPC listeners.
      */
     generateStream: (
       request: AIRequest,
       onChunk: (chunk: string) => void,
       onDone: (conversationId: string) => void,
-      onError: (error: string) => void
+      onError: (error: string) => void,
+      onToolExecuted?: (event: AIToolEvent) => void
     ): (() => void) => {
       const chunkHandler = (_: unknown, chunk: string): void => onChunk(chunk)
       const doneHandler = (_: unknown, data: { conversationId: string }): void => {
@@ -120,14 +122,17 @@ const api = {
         cleanup()
         onError(error)
       }
+      const toolHandler = (_: unknown, event: AIToolEvent): void => onToolExecuted?.(event)
       const cleanup = (): void => {
         ipcRenderer.removeListener(IPC.AI_STREAM_CHUNK, chunkHandler)
         ipcRenderer.removeListener(IPC.AI_STREAM_DONE, doneHandler)
         ipcRenderer.removeListener(IPC.AI_STREAM_ERROR, errorHandler)
+        ipcRenderer.removeListener(IPC.AI_TOOL_EXECUTED, toolHandler)
       }
       ipcRenderer.on(IPC.AI_STREAM_CHUNK, chunkHandler)
       ipcRenderer.on(IPC.AI_STREAM_DONE, doneHandler)
       ipcRenderer.on(IPC.AI_STREAM_ERROR, errorHandler)
+      ipcRenderer.on(IPC.AI_TOOL_EXECUTED, toolHandler)
       ipcRenderer.send(IPC.AI_GENERATE_STREAM, request)
       return cleanup
     }

@@ -42,7 +42,7 @@ import {
   type DragEvent,
   type ReactNode
 } from 'react'
-import { Plus, X, Pencil, Trash2, GripVertical } from 'lucide-react'
+import { Plus, X, Pencil, Trash2, GripVertical, Search, Archive, ArchiveRestore } from 'lucide-react'
 import { MarkdownEditor } from './MilkdownEditor'
 
 export interface KanbanEditorProps {
@@ -79,6 +79,7 @@ interface ModalState {
   cardId: string | null
   title: string
   description: string
+  labels: string[]
 }
 
 /** Lightweight confirm dialog state (replaces window.confirm). */
@@ -233,22 +234,6 @@ const inputStyle: CSSProperties = {
   boxSizing: 'border-box'
 }
 
-/**
- * Minimal HTML sanitiser for the markdown preview. Strips <script>,
- * on* event handler attributes, and javascript: URLs. This is NOT a
- * substitute for DOMPurify — add `dompurify` as a dep for full
- * coverage — but it closes the trivial XSS vectors
- * (`<img onerror=...>`, `<script>`) flagged in the P0 audit.
- */
-function escapeAndSanitiseHtml(html: string): string {
-  // Remove <script>...</script> entirely.
-  let out = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-  // Remove on*= event handler attributes.
-  out = out.replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-  // Neutralise javascript: URLs in href/src.
-  out = out.replace(/(href|src)\s*=\s*("javascript:[^"]*"|'javascript:[^']*')/gi, '$1="#"')
-  return out
-}
 
 export function KanbanEditor({
   value,
@@ -454,7 +439,7 @@ export function KanbanEditor({
   // ---------- Modal ----------
 
   const openAddModal = useCallback((columnId: string) => {
-    setModal({ mode: 'add', columnId, cardId: null, title: '', description: '' })
+    setModal({ mode: 'add', columnId, cardId: null, title: '', description: '', labels: [] })
   }, [])
 
   const openEditModal = useCallback((card: KanbanCard) => {
@@ -463,7 +448,8 @@ export function KanbanEditor({
       columnId: card.columnId,
       cardId: card.id,
       title: card.title,
-      description: card.description ?? ''
+      description: card.description ?? '',
+      labels: card.labels ?? []
     })
   }, [])
 

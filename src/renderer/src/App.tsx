@@ -159,6 +159,10 @@ export default function App() {
   // Global keyboard shortcuts for P0 features
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Skip during IME composition (e.g. Chinese pinyin mid-word).
+      // Also skip if the browser reports a stale isComposing state —
+      // e229 is the Chromium sentinel keyCode emitted for some IME events.
+      if (e.isComposing || e.keyCode === 229) return
       const mod = e.metaKey || e.ctrlKey
       if (!mod) return
       // Ctrl+P - Quick Open (not Shift+P which is Command Palette)
@@ -244,12 +248,12 @@ export default function App() {
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (hasFlushed.current) return
-      const { isDirty, currentFile, currentContent } = useFileStore.getState()
+      const { isDirty, currentFile, currentContent, currentMtime } = useFileStore.getState()
       if (!isDirty || !currentFile) return
       event.preventDefault()
       event.returnValue = ''
       window.flux.file
-        .write(currentFile.path, currentContent)
+        .writeGuarded(currentFile.path, currentContent, currentMtime)
         .catch((err) => console.error('Failed to autosave on close:', err))
         .finally(() => {
           hasFlushed.current = true
@@ -258,6 +262,12 @@ export default function App() {
     }
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [])
+
+  useEffect(() => {
+    const handler = () => setAiPanelOpen((v) => !v)
+    window.addEventListener('flux:toggle-ai', handler)
+    return () => window.removeEventListener('flux:toggle-ai', handler)
   }, [])
 
   const toggleAIPanel = () => setAiPanelOpen((v) => !v)

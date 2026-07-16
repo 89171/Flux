@@ -113,7 +113,8 @@
           ]
         }
       ],
-      "darkModeSupport": true
+      "darkModeSupport": true,
+      "icon": "build/icon.icns"
     },
     "win": {
       "target": [
@@ -123,7 +124,8 @@
             "x64"
           ]
         }
-      ]
+      ],
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -145,7 +147,8 @@
         }
       ],
       "category": "Utility",
-      "maintainer": "Flux Maintainers <xiaozhu9110@gmail.com>"
+      "maintainer": "Flux Maintainers <xiaozhu9110@gmail.com>",
+      "icon": "build/icon.png"
     }
   }
 }

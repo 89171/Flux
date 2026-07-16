@@ -47,9 +47,13 @@ const EMPTY_DIAGRAM = '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent
 function buildEmbedUrl(): string {
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
   const theme = isDark ? 'dark' : 'default'
+  // noSaveBtn=1  — hides the in-diagram Save button
+  // saveAndExit=0 — removes the Save&Exit button
+  // noExitBtn=1  — removes the Exit button
+  // Saving is handled by the app's Ctrl+S global shortcut instead.
   return (
-    `${DRAWIO_ORIGIN}/?embed=1&proto=json&ui=minimal&spin=1&saveAndExit=1&noSaveBtn=0` +
-    `&theme=${theme}`
+    `${DRAWIO_ORIGIN}/?embed=1&proto=json&ui=minimal&spin=1` +
+    `&saveAndExit=0&noSaveBtn=1&noExitBtn=1&theme=${theme}`
   )
 }
 
@@ -63,6 +67,7 @@ export function DrawioEditor({
 }: DrawioEditorProps): JSX.Element {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const onChangeRef = useRef(onChange)
+  const onRequestSaveRef = useRef<(() => void) | undefined>(onRequestSave)
   const valueRef = useRef(value)
   const isReadyRef = useRef(false)
   const pendingValueRef = useRef<string | null>(null)
@@ -73,6 +78,7 @@ export function DrawioEditor({
   )
 
   onChangeRef.current = onChange
+  onRequestSaveRef.current = onRequestSave
   valueRef.current = value
 
   // ---------- Message handling ----------
@@ -114,9 +120,12 @@ export function DrawioEditor({
         break
 
       case 'save':
-        // User clicked save inside draw.io — forward the new XML.
+        // Ctrl+S inside draw.io — update content and persist to disk.
+        // Zustand's set() is synchronous so onRequestSave reads the new
+        // content from get() immediately after onChange runs.
         if (msg.xml) {
           onChangeRef.current(msg.xml)
+          onRequestSaveRef.current?.()
         }
         iframe.contentWindow?.postMessage(
           JSON.stringify({ action: 'saved' }),
@@ -125,16 +134,17 @@ export function DrawioEditor({
         break
 
       case 'exit':
-        // User clicked exit/close — send the final XML
         if (msg.xml) {
           onChangeRef.current(msg.xml)
+          onRequestSaveRef.current?.()
         }
         break
 
       case 'export':
-        // Export event — used by our Cmd+S handler to pull the XML.
+        // Response to our Cmd+S export request — update content and save.
         if (msg.data) {
           onChangeRef.current(msg.data)
+          onRequestSaveRef.current?.()
         }
         break
     }

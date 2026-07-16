@@ -14,6 +14,7 @@
 import { useState, useEffect, useCallback, type CSSProperties } from 'react'
 import { X, Save, Sun, Moon, BookOpen, Copy, Check, ExternalLink } from 'lucide-react'
 import type { AppSettings } from '@shared/types'
+import { API_KEY_SENTINEL } from '@shared/constants'
 
 interface SettingsPanelProps {
   onClose: () => void
@@ -118,6 +119,8 @@ const PROVIDER_GUIDE: ProviderGuideEntry[] = [
 function SettingsPanel({ onClose, onThemeChange }: SettingsPanelProps) {
   const [loaded, setLoaded] = useState(false)
   const [aiProvider, setAiProvider] = useState<AIProvider>('none')
+  // apiKey holds either '' (not set), a new key typed by the user, or
+  // API_KEY_SENTINEL (key is set on disk but not echoed to the renderer).
   const [apiKey, setApiKey] = useState('')
   const [model, setModel] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
@@ -140,6 +143,7 @@ function SettingsPanel({ onClose, onThemeChange }: SettingsPanelProps) {
         const s = await window.flux.settings.get()
         if (cancelled) return
         setAiProvider(s.ai.provider)
+        // Keep the sentinel as-is — the input renders it as a placeholder.
         setApiKey(s.ai.apiKey)
         setModel(s.ai.model)
         setBaseUrl(s.ai.baseUrl)
@@ -230,6 +234,9 @@ function SettingsPanel({ onClose, onThemeChange }: SettingsPanelProps) {
     setError(null)
     setSaveMessage('')
     setSaveStatus('testing')
+    // When the user hasn't typed a new key, echo the sentinel back so the
+    // main process preserves the real key instead of overwriting it.
+    const effectiveKey = apiKey === API_KEY_SENTINEL ? API_KEY_SENTINEL : apiKey
     try {
       // 1. Probe the candidate config with a live round-trip before
       //    persisting. testConfig swaps the config in temporarily and
@@ -237,7 +244,7 @@ function SettingsPanel({ onClose, onThemeChange }: SettingsPanelProps) {
       //    disrupt in-flight AI calls.
       const testResult = await window.flux.ai.testConfig({
         provider: aiProvider,
-        apiKey,
+        apiKey: effectiveKey,
         model,
         baseUrl
       })
@@ -252,10 +259,10 @@ function SettingsPanel({ onClose, onThemeChange }: SettingsPanelProps) {
       await window.flux.settings.set({
         ai: {
           provider: aiProvider,
-          apiKey,
+          apiKey: effectiveKey,
           model,
           baseUrl
-        }
+        } as AppSettings['ai']
       })
       setSaveStatus('success')
       setSaveMessage('Configuration test passed. Settings saved.')
@@ -504,8 +511,8 @@ function SettingsPanel({ onClose, onThemeChange }: SettingsPanelProps) {
                 id="settings-apikey"
                 type="password"
                 style={inputStyle}
-                value={apiKey}
-                placeholder="sk-..."
+                value={apiKey === API_KEY_SENTINEL ? '' : apiKey}
+                placeholder={apiKey === API_KEY_SENTINEL ? '••••••••  (configured — type to replace)' : 'sk-...'}
                 onChange={(e) => setApiKey(e.target.value)}
                 disabled={!loaded}
                 autoComplete="off"
