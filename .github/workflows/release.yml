@@ -54,7 +54,7 @@ jobs:
       # 如有 Apple 开发者证书，移除该环境变量并在 Secrets 中配置
       # CSC_LINK / CSC_KEY_PASSWORD
       - name: Package (electron-builder)
-        run: npx electron-builder ${{ matrix.args }}
+        run: npx electron-builder ${{ matrix.args }} --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
