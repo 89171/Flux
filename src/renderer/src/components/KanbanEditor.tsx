@@ -42,8 +42,8 @@ import {
   type DragEvent,
   type ReactNode
 } from 'react'
-import { Plus, X, Pencil, Trash2, GripVertical, Archive, Search, ArchiveRestore } from 'lucide-react'
-import { marked } from 'marked'
+import { Plus, X, Pencil, Trash2, GripVertical } from 'lucide-react'
+import { MarkdownEditor } from './MilkdownEditor'
 
 export interface KanbanEditorProps {
   value: string
@@ -79,8 +79,6 @@ interface ModalState {
   cardId: string | null
   title: string
   description: string
-  labels: string[]
-  tab: 'write' | 'preview'
 }
 
 /** Lightweight confirm dialog state (replaces window.confirm). */
@@ -456,7 +454,7 @@ export function KanbanEditor({
   // ---------- Modal ----------
 
   const openAddModal = useCallback((columnId: string) => {
-    setModal({ mode: 'add', columnId, cardId: null, title: '', description: '', labels: [], tab: 'write' })
+    setModal({ mode: 'add', columnId, cardId: null, title: '', description: '' })
   }, [])
 
   const openEditModal = useCallback((card: KanbanCard) => {
@@ -465,9 +463,7 @@ export function KanbanEditor({
       columnId: card.columnId,
       cardId: card.id,
       title: card.title,
-      description: card.description ?? '',
-      labels: card.labels ?? [],
-      tab: 'write'
+      description: card.description ?? ''
     })
   }, [])
 
@@ -571,15 +567,6 @@ export function KanbanEditor({
     return map
   }, [doc, searchQuery, showArchived])
 
-  const renderedMarkdown = useMemo(() => {
-    if (!modal?.description) return ''
-    try {
-      const html = marked.parse(modal.description) as string
-      return escapeAndSanitiseHtml(html)
-    } catch {
-      return ''
-    }
-  }, [modal?.description, modal?.tab])
 
   // ---------- Render ----------
 
@@ -903,127 +890,28 @@ export function KanbanEditor({
               />
             </div>
 
-            {/* Labels */}
-            <div>
-              <div style={labelHeadingStyle}>标签</div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {Object.entries(LABEL_PALETTE).map(([id, color]) => {
-                  const active = modal.labels.includes(id)
-                  return (
-                    <button
-                      key={id}
-                      onClick={() =>
-                        setModal((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                labels: active
-                                  ? prev.labels.filter((l) => l !== id)
-                                  : [...prev.labels, id]
-                              }
-                            : null
-                        )
-                      }
-                      style={{
-                        padding: '3px 10px',
-                        borderRadius: 4,
-                        border: '1px solid',
-                        borderColor: active ? color : 'var(--border-color)',
-                        background: active ? color : 'transparent',
-                        color: active ? '#fff' : 'var(--text-secondary)',
-                        cursor: 'pointer',
-                        fontSize: 11,
-                        fontWeight: 500
-                      }}
-                    >
-                      {LABEL_NAMES[id] ?? id}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-
-            {/* Description */}
+            {/* Description — WYSIWYG Milkdown editor */}
             <div style={{ flex: 1 }}>
               <div
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: 'var(--text-tertiary)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
                   marginBottom: 6
                 }}
               >
-                <div style={labelHeadingStyle}>内容</div>
-                <div style={{ display: 'flex', border: '1px solid var(--border-color)', borderRadius: 5, overflow: 'hidden' }}>
-                  {(['write', 'preview'] as const).map((tab) => (
-                    <button
-                      key={tab}
-                      onClick={() =>
-                        setModal((prev) => (prev ? { ...prev, tab } : null))
-                      }
-                      style={{
-                        padding: '3px 10px',
-                        fontSize: 12,
-                        background: modal.tab === tab ? 'var(--bg-active)' : 'transparent',
-                        border: 'none',
-                        cursor: 'pointer',
-                        color: modal.tab === tab ? 'var(--text-primary)' : 'var(--text-tertiary)',
-                        fontWeight: modal.tab === tab ? 600 : 400,
-                        transition: 'background 0.1s'
-                      }}
-                    >
-                      {tab === 'write' ? '编辑' : '预览'}
-                    </button>
-                  ))}
-                </div>
+                内容
               </div>
-
-              {modal.tab === 'write' ? (
-                <textarea
+              <div className="kanban-modal-md">
+                <MarkdownEditor
                   value={modal.description}
-                  onChange={(e) =>
-                    setModal((prev) => (prev ? { ...prev, description: e.target.value } : null))
+                  onChange={(md) =>
+                    setModal((prev) => (prev ? { ...prev, description: md } : null))
                   }
-                  onKeyDown={(e) => {
-                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') saveModal()
-                    if (e.key === 'Escape') closeModal()
-                  }}
-                  placeholder="支持 Markdown 格式…"
-                  rows={8}
-                  style={{
-                    ...inputStyle,
-                    resize: 'vertical',
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: 13,
-                    lineHeight: 1.6
-                  }}
                 />
-              ) : (
-                <div
-                  style={{
-                    minHeight: 120,
-                    padding: '8px 10px',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: 6,
-                    background: 'var(--bg-secondary)',
-                    fontSize: 13,
-                    color: 'var(--text-primary)',
-                    lineHeight: 1.7,
-                    overflowY: 'auto'
-                  }}
-                  className="kanban-md-preview markdown-preview"
-                  // eslint-disable-next-line react/no-danger
-                  dangerouslySetInnerHTML={{
-                    __html: renderedMarkdown ||
-                      '<span style="color:var(--text-tertiary);font-style:italic">无内容</span>'
-                  }}
-                />
-              )}
-              {modal.tab === 'write' && (
-                <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-tertiary)' }}>
-                  支持 Markdown · Ctrl+Enter 保存
-                </div>
-              )}
+              </div>
             </div>
 
             {/* Footer */}

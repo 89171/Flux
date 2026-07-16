@@ -1,5 +1,5 @@
 {
-  "name": "flux",
+  "name": "Flux",
   "version": "1.0.0",
   "description": "Flux - A plugin-based desktop note-taking app with AI and pin-to-top",
   "main": "./out/main/index.js",

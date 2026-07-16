@@ -734,3 +734,24 @@
 }
 .kanban-md-preview strong { font-weight: 600; }
 .kanban-md-preview em { font-style: italic; }
+
+/* ── Kanban card modal — compact WYSIWYG editor ──────────────── */
+.kanban-modal-md .markdown-editor-wrapper {
+  height: auto;
+  min-height: 180px;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+}
+.kanban-modal-md .markdown-editor-wrapper .milkdown {
+  max-width: 100%;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  min-height: 160px;
+}
+.kanban-modal-md .markdown-editor-wrapper h1 { font-size: 18px; }
+.kanban-modal-md .markdown-editor-wrapper h2 { font-size: 16px; }
+.kanban-modal-md .markdown-editor-wrapper h3 { font-size: 14px; }
