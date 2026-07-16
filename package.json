@@ -144,7 +144,8 @@
           ]
         }
       ],
-      "category": "Utility"
+      "category": "Utility",
+      "maintainer": "Flux Maintainers <xiaozhu9110@gmail.com>"
     }
   }
 }
