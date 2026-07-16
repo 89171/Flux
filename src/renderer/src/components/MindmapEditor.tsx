@@ -155,16 +155,20 @@ export function MindmapEditor({
     }
     me.bus.addListener('operation', handleOperation)
 
-    // Detect direction changes made via the Mind-Elixir toolbar — those
-    // don't fire 'operation', so we check on mouseup.
+    // Detect direction changes from the Mind-Elixir toolbar. Toolbar
+    // buttons use 'click' listeners that run AFTER 'mouseup', so we
+    // defer the check with setTimeout(0) to read the already-updated
+    // me.direction value.
     const checkDirection = (): void => {
-      const inst = instanceRef.current
-      if (!inst) return
-      const currentDir = (inst as MindElixirInstance & { direction: number }).direction
-      if (typeof currentDir === 'number' && currentDir !== lastDirectionRef.current) {
-        lastDirectionRef.current = currentDir
-        handleOperation()
-      }
+      setTimeout(() => {
+        const inst = instanceRef.current
+        if (!inst) return
+        const currentDir = inst.direction
+        if (currentDir !== lastDirectionRef.current) {
+          lastDirectionRef.current = currentDir
+          handleOperation()
+        }
+      }, 0)
     }
     el.addEventListener('mouseup', checkDirection)
 

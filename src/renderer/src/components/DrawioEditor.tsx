@@ -47,12 +47,13 @@ const EMPTY_DIAGRAM = '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent
 function buildEmbedUrl(): string {
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
   const theme = isDark ? 'dark' : 'default'
-  // noSaveBtn=1  — hides the in-diagram Save button
+  // ui=min        — valid "minimal" draw.io theme; sidebar starts collapsed
+  // noLibraries=1 — disables the shape library so the left panel stays closed
+  // noSaveBtn=1   — hides the in-diagram Save button
   // saveAndExit=0 — removes the Save&Exit button
-  // noExitBtn=1  — removes the Exit button
-  // Saving is handled by the app's Ctrl+S global shortcut instead.
+  // noExitBtn=1   — removes the Exit button
   return (
-    `${DRAWIO_ORIGIN}/?embed=1&proto=json&ui=minimal&spin=1` +
+    `${DRAWIO_ORIGIN}/?embed=1&proto=json&ui=min&noLibraries=1&spin=1` +
     `&saveAndExit=0&noSaveBtn=1&noExitBtn=1&theme=${theme}`
   )
 }
@@ -99,13 +100,28 @@ export function DrawioEditor({
 
     switch (msg.event) {
       case 'init':
-        // Editor is ready; send the initial content.
+        // Editor is ready. Configure first (hides library/format panels),
+        // then load the diagram content.
         isReadyRef.current = true
         setLoadState('ready')
         if (initTimerRef.current) {
           clearTimeout(initTimerRef.current)
           initTimerRef.current = null
         }
+        // Disable shape libraries so the left panel stays closed and
+        // suppress the empty right format panel on load.
+        iframe.contentWindow?.postMessage(
+          JSON.stringify({
+            action: 'configure',
+            config: {
+              defaultLibraries: '',
+              enabledLibraries: [],
+              defaultEdgeStyle: {},
+              defaultVertexStyle: {}
+            }
+          }),
+          DRAWIO_ORIGIN
+        )
         iframe.contentWindow?.postMessage(
           JSON.stringify({
             action: 'load',
