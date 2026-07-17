@@ -24,14 +24,21 @@ import {
   useState,
   type CSSProperties
 } from 'react'
-import { FileImage, FileCode, Code, Eye, Columns } from 'lucide-react'
+import { FileImage, FileCode, Code, Eye, Columns, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react'
 import mermaid from 'mermaid'
 import CodeMirrorEditor from './CodeMirrorEditor'
+import {
+  getExportBaseName,
+  saveBlobExport,
+  saveTextExport,
+  svgToPngBlob
+} from '../utils/exportUtils'
 
 export interface MermaidEditorProps {
   value: string
   onChange: (data: string) => void
   className?: string
+  fileName?: string
 }
 
 type MermaidTheme = 'default' | 'dark'
@@ -57,18 +64,29 @@ function ensureInit(theme: MermaidTheme): void {
   currentTheme = theme
 }
 
+const PREVIEW_ZOOM_MIN = 0.25
+const PREVIEW_ZOOM_MAX = 3
+const PREVIEW_ZOOM_STEP = 0.25
+
+function clampPreviewZoom(value: number): number {
+  return Math.min(PREVIEW_ZOOM_MAX, Math.max(PREVIEW_ZOOM_MIN, value))
+}
+
 export function MermaidEditor({
   value,
   onChange,
-  className
+  className,
+  fileName = 'diagram.mmd'
 }: MermaidEditorProps): JSX.Element {
   const [svg, setSvg] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
   const [isExporting, setIsExporting] = useState(false)
   const [viewMode, setViewMode] = useState<'both' | 'editor' | 'preview'>('both')
+  const [previewZoom, setPreviewZoom] = useState(1)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+  const exportBaseName = getExportBaseName(fileName)
 
   // Per-instance render counter — avoids cross-window id collisions
   // when two Flux windows render mermaid concurrently.
@@ -125,39 +143,34 @@ export function MermaidEditor({
   const handleExportSvg = useCallback(async () => {
     if (!svg) return
     try {
-      const blob = new Blob([svg], { type: 'image/svg+xml' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `diagram-${Date.now()}.svg`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      await saveTextExport({
+        title: '导出 SVG',
+        defaultPath: `${exportBaseName}.svg`,
+        filters: [{ name: 'SVG', extensions: ['svg'] }],
+        data: svg
+      })
     } catch (err) {
       console.error('[Mermaid] SVG export failed:', err)
     }
-  }, [svg])
+  }, [svg, exportBaseName])
 
   const handleExportPng = useCallback(async () => {
     if (!svg) return
     setIsExporting(true)
     try {
-      const blob = await svgToPngBlob(svg, 2)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `diagram-${Date.now()}.png`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      const blob = await svgToPngBlob(svg, 2, isDarkTheme() ? '#1a1a1a' : '#ffffff')
+      await saveBlobExport({
+        title: '导出 PNG',
+        defaultPath: `${exportBaseName}.png`,
+        filters: [{ name: 'PNG', extensions: ['png'] }],
+        blob
+      })
     } catch (err) {
       console.error('[Mermaid] PNG export failed:', err)
     } finally {
       setIsExporting(false)
     }
-  }, [svg])
+  }, [svg, exportBaseName])
 
   const previewNode = useMemo(() => {
     if (error) {
@@ -189,10 +202,16 @@ export function MermaidEditor({
       <div
         // eslint-disable-next-line react/no-danger
         dangerouslySetInnerHTML={{ __html: svg }}
-        style={{ padding: 16, display: 'flex', justifyContent: 'center' }}
+        style={{
+          padding: 16,
+          display: 'flex',
+          justifyContent: 'center',
+          minWidth: 'max-content',
+          zoom: previewZoom
+        } as CSSProperties}
       />
     )
-  }, [svg, error])
+  }, [svg, error, previewZoom])
 
   return (
     <div
@@ -250,6 +269,35 @@ export function MermaidEditor({
           <Eye size={13} />
         </button>
         <div style={{ width: 1, height: 16, background: 'var(--border-light)', margin: '0 4px' }} />
+        {viewMode !== 'editor' && (
+          <>
+            <button
+              onClick={() => setPreviewZoom((zoom) => clampPreviewZoom(zoom - PREVIEW_ZOOM_STEP))}
+              disabled={previewZoom <= PREVIEW_ZOOM_MIN}
+              title="缩小预览"
+              style={toolbarBtnStyle}
+            >
+              <ZoomOut size={13} />
+            </button>
+            <button
+              onClick={() => setPreviewZoom(1)}
+              title="重置缩放"
+              style={toolbarBtnStyle}
+            >
+              <RotateCcw size={13} />
+              <span>{Math.round(previewZoom * 100)}%</span>
+            </button>
+            <button
+              onClick={() => setPreviewZoom((zoom) => clampPreviewZoom(zoom + PREVIEW_ZOOM_STEP))}
+              disabled={previewZoom >= PREVIEW_ZOOM_MAX}
+              title="放大预览"
+              style={toolbarBtnStyle}
+            >
+              <ZoomIn size={13} />
+            </button>
+            <div style={{ width: 1, height: 16, background: 'var(--border-light)', margin: '0 4px' }} />
+          </>
+        )}
         <button
           onClick={handleExportSvg}
           disabled={!svg}
@@ -292,6 +340,13 @@ export function MermaidEditor({
         )}
         {viewMode !== 'editor' && (
           <div
+            onWheel={(e) => {
+              if (!e.metaKey && !e.ctrlKey) return
+              e.preventDefault()
+              setPreviewZoom((zoom) =>
+                clampPreviewZoom(zoom + (e.deltaY > 0 ? -PREVIEW_ZOOM_STEP : PREVIEW_ZOOM_STEP))
+              )
+            }}
             style={{
               flex: 1,
               minWidth: 200,
@@ -320,44 +375,6 @@ const toolbarBtnStyle: CSSProperties = {
   cursor: 'pointer',
   fontSize: 12,
   fontFamily: 'var(--font-sans)'
-}
-
-/**
- * Rasterise an SVG string into a PNG blob. Draws the SVG onto a canvas
- * at 2× scale for crisp output. Falls back to a dimensioned canvas if
- * the SVG has no intrinsic width/height.
- */
-async function svgToPngBlob(svg: string, scale: number): Promise<Blob> {
-  return new Promise<Blob>((resolve, reject) => {
-    const svgBlob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
-    const url = URL.createObjectURL(svgBlob)
-    const img = new Image()
-    img.onload = () => {
-      try {
-        const w = img.naturalWidth || img.width || 800
-        const h = img.naturalHeight || img.height || 600
-        const canvas = document.createElement('canvas')
-        canvas.width = w * scale
-        canvas.height = h * scale
-        const ctx = canvas.getContext('2d')
-        if (!ctx) throw new Error('Canvas 2D context unavailable')
-        ctx.fillStyle = isDarkTheme() ? '#1a1a1a' : '#ffffff'
-        ctx.fillRect(0, 0, canvas.width, canvas.height)
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-        canvas.toBlob((blob) => {
-          if (blob) resolve(blob)
-          else reject(new Error('toBlob returned null'))
-        }, 'image/png')
-      } finally {
-        URL.revokeObjectURL(url)
-      }
-    }
-    img.onerror = () => {
-      URL.revokeObjectURL(url)
-      reject(new Error('Failed to load SVG into Image'))
-    }
-    img.src = url
-  })
 }
 
 export default MermaidEditor

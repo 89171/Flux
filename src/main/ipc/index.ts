@@ -128,6 +128,30 @@ export function registerIPC(
     return true
   })
 
+  ipcMain.handle(IPC.FILE_REVEAL_IN_FOLDER, async (_event, relativePath: string) => {
+    const fullPath = fsManager.resolvePath(relativePath)
+    shell.showItemInFolder(fullPath)
+    return true
+  })
+
+  ipcMain.handle(IPC.FILE_HISTORY_LIST, async (_event, relativePath: string) => {
+    return fsManager.listFileHistory(relativePath)
+  })
+
+  ipcMain.handle(IPC.FILE_HISTORY_READ, async (_event, relativePath: string, id: string) => {
+    return fsManager.readFileHistoryEntry(relativePath, id)
+  })
+
+  ipcMain.handle(IPC.FILE_HISTORY_RESTORE, async (event, relativePath: string, id: string) => {
+    const result = fsManager.restoreFileHistory(relativePath, id)
+    broadcastFileChanged(event.sender.id, {
+      path: relativePath,
+      mtime: result.mtime,
+      content: result.content
+    })
+    return result
+  })
+
   ipcMain.handle(
     IPC.FILE_SEARCH,
     async (_event, query: string, maxResults?: number): Promise<SearchResult[]> => {
@@ -220,6 +244,34 @@ ${htmlBody}
     return result.filePath
   })
 
+  ipcMain.handle(
+    IPC.FILE_EXPORT_DATA,
+    async (
+      _event,
+      opts: {
+        title?: string
+        defaultPath: string
+        filters?: Array<{ name: string; extensions: string[] }>
+        data: string
+        encoding?: 'utf8' | 'base64'
+      }
+    ) => {
+      const result = await dialog.showSaveDialog({
+        ...(opts.title ? { title: opts.title } : {}),
+        defaultPath: opts.defaultPath,
+        ...(opts.filters ? { filters: opts.filters } : {})
+      })
+      if (result.canceled || !result.filePath) return null
+
+      if (opts.encoding === 'base64') {
+        writeFileSync(result.filePath, Buffer.from(opts.data, 'base64'))
+      } else {
+        writeFileSync(result.filePath, opts.data, 'utf-8')
+      }
+      return result.filePath
+    }
+  )
+
   // ============ Window IPC ============
 
   ipcMain.handle(IPC.WINDOW_OPEN_NOTE, async (_event, opts: {
@@ -268,17 +320,21 @@ ${htmlBody}
     }
   )
 
-  ipcMain.handle(IPC.WINDOW_CLOSE, async (_event, noteId: string) => {
-    windowManager.closeNoteWindow(noteId)
+  ipcMain.handle(IPC.WINDOW_CLOSE, async (event, noteId?: string) => {
+    if (noteId) {
+      windowManager.closeNoteWindow(noteId)
+    } else {
+      BrowserWindow.fromWebContents(event.sender)?.close()
+    }
     return true
   })
 
-  ipcMain.handle(IPC.WINDOW_MINIMIZE, async (_event, noteId?: string) => {
+  ipcMain.handle(IPC.WINDOW_MINIMIZE, async (event, noteId?: string) => {
     if (noteId) {
       const managed = windowManager.noteWindows.get(noteId)
       managed?.window.minimize()
     } else {
-      windowManager.mainWindow?.minimize()
+      BrowserWindow.fromWebContents(event.sender)?.minimize()
     }
     return true
   })
@@ -680,18 +736,16 @@ ${htmlBody}
 
   // ============ Window Controls (ipcMain.on) ============
 
-  ipcMain.on('window:minimize', () => {
-    const win = BrowserWindow.getFocusedWindow()
-    win?.minimize()
+  ipcMain.on('window:minimize', (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize()
   })
 
-  ipcMain.on('window:close', () => {
-    const win = BrowserWindow.getFocusedWindow()
-    win?.close()
+  ipcMain.on('window:close', (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.close()
   })
 
-  ipcMain.on('window:maximize', () => {
-    const win = BrowserWindow.getFocusedWindow()
+  ipcMain.on('window:maximize', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
     if (win) {
       if (win.isMaximized()) {
         win.unmaximize()

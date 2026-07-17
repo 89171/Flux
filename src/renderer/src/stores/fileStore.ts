@@ -32,6 +32,13 @@ interface FileState {
 
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null
 
+function clearAutosaveTimer(): void {
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer)
+    autosaveTimer = null
+  }
+}
+
 export const useFileStore = create<FileState>((set, get) => ({
   tree: [],
   currentFile: null,
@@ -63,10 +70,12 @@ export const useFileStore = create<FileState>((set, get) => ({
 
   openFile: async (file) => {
     if (file.type === 'directory') return
+    window.dispatchEvent(new CustomEvent('flux:flush-active-editor'))
     const state = get()
     // Flush unsaved edits before switching. Uses the guarded write so a
     // conflict aborts the switch instead of clobbering another window's edits.
     if (state.isDirty && state.currentFile) {
+      clearAutosaveTimer()
       try {
         const result = await window.flux.file.writeGuarded(
           state.currentFile.path,
@@ -112,8 +121,8 @@ export const useFileStore = create<FileState>((set, get) => ({
     if (autosaveTimer) clearTimeout(autosaveTimer)
     autosaveTimer = setTimeout(async () => {
       autosaveTimer = null
-      const { currentFile, currentContent: latest, currentMtime, hasConflict } = get()
-      if (!currentFile || hasConflict) return
+      const { currentFile, currentContent: latest, currentMtime, hasConflict, isDirty } = get()
+      if (!currentFile || hasConflict || !isDirty) return
       try {
         const result = await window.flux.file.writeGuarded(currentFile.path, latest, currentMtime)
         if (result.ok) {
@@ -130,10 +139,7 @@ export const useFileStore = create<FileState>((set, get) => ({
   saveFile: async () => {
     const { currentFile, currentContent, currentMtime } = get()
     if (!currentFile) return
-    if (autosaveTimer) {
-      clearTimeout(autosaveTimer)
-      autosaveTimer = null
-    }
+    clearAutosaveTimer()
     try {
       const result = await window.flux.file.writeGuarded(
         currentFile.path,

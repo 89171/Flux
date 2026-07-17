@@ -5,6 +5,7 @@
 
 import { useState, useEffect, type CSSProperties } from 'react'
 import { Github } from 'lucide-react'
+import appIcon from '../assets/app-icon.png'
 
 interface AboutDialogProps {
   onClose: () => void
@@ -45,15 +46,8 @@ const appIconStyle: CSSProperties = {
   width: 64,
   height: 64,
   margin: '0 auto 12px',
-  borderRadius: 'var(--radius-md, 8px)',
-  background: 'var(--accent-primary)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  color: '#fff',
-  fontSize: 32,
-  fontWeight: 700,
-  fontFamily: 'var(--font-sans)'
+  borderRadius: 14,
+  display: 'block'
 }
 
 const appNameStyle: CSSProperties = {
@@ -164,7 +158,7 @@ export default function AboutDialog({ onClose }: AboutDialogProps) {
     <div style={overlayStyle} onClick={handleOverlayClick}>
       <div style={modalStyle}>
         <div style={headerStyle}>
-          <div style={appIconStyle}>F</div>
+          <img src={appIcon} alt="Flux" style={appIconStyle} />
           <div style={appNameStyle}>Flux</div>
           <span style={versionBadgeStyle}>v{version || '—'}</span>
         </div>

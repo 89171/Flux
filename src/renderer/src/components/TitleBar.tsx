@@ -8,6 +8,7 @@
  */
 
 import type { CSSProperties } from 'react'
+import { useFileStore } from '../stores/fileStore'
 
 type CSSPropertiesWithAppRegion = CSSProperties & {
   WebkitAppRegion?: 'drag' | 'no-drag' | string
@@ -17,6 +18,9 @@ type CSSPropertiesWithAppRegion = CSSProperties & {
 const TRAFFIC_LIGHT_WIDTH = 78
 
 export function TitleBar() {
+  const currentFile = useFileStore((s) => s.currentFile)
+  const title = currentFile?.name ?? 'Flux'
+
   return (
     <div
       style={
@@ -47,14 +51,19 @@ export function TitleBar() {
         }}
       >
         <span
+          title={title}
           style={{
             fontSize: 13,
             fontWeight: 600,
             color: 'var(--text-primary)',
-            letterSpacing: 0.3,
+            letterSpacing: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            maxWidth: '60vw',
           }}
         >
-          Flux
+          {title}
         </span>
       </div>
 

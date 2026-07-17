@@ -9,6 +9,10 @@ export const IPC = {
   FILE_TREE: 'file:tree',
   FILE_MOVE: 'file:move',
   FILE_OPEN_EXTERNAL: 'file:openExternal',
+  FILE_REVEAL_IN_FOLDER: 'file:revealInFolder',
+  FILE_HISTORY_LIST: 'file:history:list',
+  FILE_HISTORY_READ: 'file:history:read',
+  FILE_HISTORY_RESTORE: 'file:history:restore',
   /** Broadcast event name (not invoked). Payload: FileChangedEvent. */
   FILE_CHANGED_EVENT: 'file:changed',
   /** Broadcast event when the file tree structure changes. Payload: NoteFile[]. */
@@ -69,7 +73,9 @@ export const IPC = {
   /** Export content to PDF. Payload: { content: string, fileName: string }. Returns save path or null. */
   FILE_EXPORT_PDF: 'file:exportPdf',
   /** Export content to HTML. Payload: { content: string, fileName: string }. Returns save path or null. */
-  FILE_EXPORT_HTML: 'file:exportHtml'
+  FILE_EXPORT_HTML: 'file:exportHtml',
+  /** Save an already-rendered export payload. Returns save path or null. */
+  FILE_EXPORT_DATA: 'file:exportData'
 } as const
 
 export type IPCChannel = (typeof IPC)[keyof typeof IPC]

@@ -57,11 +57,13 @@ import {
   GitMerge,
   LayoutGrid,
   Waypoints,
-  PanelLeftClose
+  PanelLeftClose,
+  History as HistoryIcon
 } from 'lucide-react'
 import type { NoteFile, NoteFormat } from '@shared/types'
 import { useFileStore } from '../stores/fileStore'
 import { usePluginStore } from '../stores/pluginStore'
+import FileHistoryDialog from './FileHistoryDialog'
 
 interface ContextMenuState {
   x: number
@@ -83,6 +85,13 @@ interface FileTypeOption {
   label: string
   extension: string
   icon?: string // resolved file:// URL or lucide icon name
+}
+
+function getRevealInFolderLabel(): string {
+  const platform = navigator.platform.toLowerCase()
+  if (platform.includes('mac')) return 'Reveal in Finder'
+  if (platform.includes('win')) return 'Show in File Explorer'
+  return 'Show in File Manager'
 }
 
 /** Lucide icon component to render for a built-in format (no plugin icon). */
@@ -430,9 +439,9 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const moveFile = useFileStore((s) => s.moveFile)
   const loadTree = useFileStore((s) => s.loadTree)
   const openFolder = useFileStore((s) => s.openFolder)
+  const reloadCurrent = useFileStore((s) => s.reloadCurrent)
 
   const plugins = usePluginStore((s) => s.plugins)
-  const loadPlugins = usePluginStore((s) => s.loadPlugins)
 
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
@@ -441,6 +450,7 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const [dragOverPath, setDragOverPath] = useState<string | null>(null)
   const draggingPathRef = useRef<string | null>(null)
   const [showNewFileMenu, setShowNewFileMenu] = useState(false)
+  const [historyFile, setHistoryFile] = useState<NoteFile | null>(null)
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
   const [contextNewFileSubmenuOpen, setContextNewFileSubmenuOpen] = useState(false)
   // Both the toolbar and the empty-state show a "New File" button.
@@ -696,6 +706,20 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
     } catch (err) {
       console.error('Failed to open externally:', err)
     }
+  }, [])
+
+  const handleRevealInFolder = useCallback(async (node: NoteFile) => {
+    setContextMenu(null)
+    try {
+      await window.flux.file.revealInFolder(node.path)
+    } catch (err) {
+      console.error('Failed to reveal in folder:', err)
+    }
+  }, [])
+
+  const handleShowHistory = useCallback((node: NoteFile) => {
+    setContextMenu(null)
+    setHistoryFile(node)
   }, [])
 
   const handleContextDelete = useCallback(
@@ -1100,6 +1124,22 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
           >
             <ExternalLink size={14} /> Open Externally
           </div>
+          {contextMenu.node.type === 'file' && (
+            <div
+              className="context-menu-item"
+              onClick={() => handleShowHistory(contextMenu.node)}
+            >
+              <HistoryIcon size={14} /> History
+            </div>
+          )}
+          {contextMenu.node.id !== '__root__' && (
+            <div
+              className="context-menu-item"
+              onClick={() => handleRevealInFolder(contextMenu.node)}
+            >
+              <FolderOpenIcon size={14} /> {getRevealInFolderLabel()}
+            </div>
+          )}
           {contextMenu.node.id !== '__root__' && (
             <>
               <div className="context-menu-divider" />
@@ -1112,6 +1152,19 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
             </>
           )}
         </div>
+      )}
+
+      {historyFile && (
+        <FileHistoryDialog
+          file={historyFile}
+          onClose={() => setHistoryFile(null)}
+          onRestored={async () => {
+            if (currentFile?.path === historyFile.path) {
+              await reloadCurrent()
+              window.dispatchEvent(new CustomEvent('flux:force-editor-remount'))
+            }
+          }}
+        />
       )}
     </div>
   )

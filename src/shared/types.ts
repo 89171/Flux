@@ -45,6 +45,21 @@ export interface FileChangedEvent {
   content: string
 }
 
+export type FileHistoryAction = 'save' | 'delete' | 'rename' | 'move' | 'restore'
+
+export interface FileHistoryEntry {
+  id: string
+  path: string
+  name: string
+  timestamp: number
+  size: number
+  action: FileHistoryAction
+}
+
+export interface FileHistoryReadResult extends FileHistoryEntry {
+  content: string
+}
+
 // ============ Plugin System Types ============
 
 export interface PluginManifest {
@@ -311,6 +326,12 @@ export interface AppSettings {
    * every time the user toggles from the market UI.
    */
   pluginState?: Record<string, { enabled: boolean }>
+  /**
+   * User keyboard-shortcut overrides, keyed by command id (see
+   * shared/shortcuts.ts). Only bindings the user changed are stored;
+   * absent ids fall back to the command's default binding.
+   */
+  shortcuts?: Record<string, string>
 }
 
 // ============ Update Check Types ============

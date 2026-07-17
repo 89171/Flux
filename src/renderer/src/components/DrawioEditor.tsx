@@ -39,6 +39,11 @@ export interface DrawioEditorProps {
   /** Called when the user triggers a save via the main app (Cmd+S). */
   onRequestSave?: () => void
   className?: string
+  onReady?: (handle: DrawioEditorHandle | null) => void
+}
+
+export interface DrawioEditorHandle {
+  exportPng: () => Promise<Blob | null>
 }
 
 const DRAWIO_ORIGIN = 'https://embed.diagrams.net'
@@ -60,11 +65,35 @@ function buildEmbedUrl(): string {
 
 type LoadState = 'loading' | 'ready' | 'error'
 
+interface PendingPngExport {
+  resolve: (blob: Blob | null) => void
+  reject: (err: Error) => void
+  timer: ReturnType<typeof setTimeout>
+}
+
+function decodeBase64Blob(base64: string, mimeType: string): Blob {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return new Blob([bytes], { type: mimeType })
+}
+
+async function drawioPngDataToBlob(data: string): Promise<Blob> {
+  if (!data) throw new Error('DrawIO PNG export returned empty data')
+  if (data.startsWith('data:')) {
+    return fetch(data).then((res) => res.blob())
+  }
+  return decodeBase64Blob(data, 'image/png')
+}
+
 export function DrawioEditor({
   value,
   onChange,
   onRequestSave,
-  className
+  className,
+  onReady
 }: DrawioEditorProps): JSX.Element {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const onChangeRef = useRef(onChange)
@@ -72,6 +101,7 @@ export function DrawioEditor({
   const valueRef = useRef(value)
   const isReadyRef = useRef(false)
   const pendingValueRef = useRef<string | null>(null)
+  const pendingPngExportRef = useRef<PendingPngExport | null>(null)
   const initTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [embedUrl, setEmbedUrl] = useState(buildEmbedUrl)
   const [loadState, setLoadState] = useState<LoadState>(() =>
@@ -157,6 +187,15 @@ export function DrawioEditor({
         break
 
       case 'export':
+        if (pendingPngExportRef.current) {
+          const pending = pendingPngExportRef.current
+          pendingPngExportRef.current = null
+          clearTimeout(pending.timer)
+          void drawioPngDataToBlob(msg.data || msg.xml || '')
+            .then(pending.resolve)
+            .catch(pending.reject)
+          break
+        }
         // Response to our Cmd+S export request — update content and save.
         if (msg.data) {
           onChangeRef.current(msg.data)
@@ -165,6 +204,39 @@ export function DrawioEditor({
         break
     }
   }, [])
+
+  const exportPng = useCallback(async (): Promise<Blob | null> => {
+    const iframe = iframeRef.current
+    if (!iframe?.contentWindow || !isReadyRef.current) return null
+    if (pendingPngExportRef.current) {
+      throw new Error('A DrawIO PNG export is already running')
+    }
+
+    return new Promise<Blob | null>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pendingPngExportRef.current = null
+        reject(new Error('DrawIO PNG export timed out'))
+      }, 15000)
+      pendingPngExportRef.current = { resolve, reject, timer }
+      iframe.contentWindow?.postMessage(
+        JSON.stringify({ action: 'export', format: 'png' }),
+        DRAWIO_ORIGIN
+      )
+    })
+  }, [])
+
+  useEffect(() => {
+    onReady?.({ exportPng })
+    return () => {
+      const pending = pendingPngExportRef.current
+      if (pending) {
+        clearTimeout(pending.timer)
+        pending.reject(new Error('DrawIO editor unmounted before export completed'))
+        pendingPngExportRef.current = null
+      }
+      onReady?.(null)
+    }
+  }, [exportPng, onReady])
 
   useEffect(() => {
     window.addEventListener('message', handleMessage)

@@ -27,13 +27,13 @@
  *    inside tldraw.
  */
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import {
   Tldraw,
-  getSnapshot,
   loadSnapshot,
   createTLStore,
   defaultShapeUtils,
+  type Editor as TldrawEditor,
   type TLEditorSnapshot,
   type TLStoreSnapshot
 } from 'tldraw'
@@ -52,24 +52,79 @@ export interface WhiteboardEditorProps {
   value: string
   onChange: (data: string) => void
   className?: string
+  onReady?: (handle: WhiteboardEditorHandle | null) => void
+}
+
+export interface WhiteboardEditorHandle {
+  flush: () => void
+  exportPng: () => Promise<Blob | null>
+}
+
+interface TldrawFileData {
+  tldrawFileFormatVersion: number
+  schema: unknown
+  records: Array<{ id: string } & Record<string, unknown>>
+}
+
+function isRecordObject(value: unknown): value is { id: string } & Record<string, unknown> {
+  return !!value && typeof value === 'object' && typeof (value as { id?: unknown }).id === 'string'
 }
 
 /**
  * Type guard: does this parsed JSON look like a tldraw snapshot?
  *
- * A `TLEditorSnapshot` has `{ schema, document, session?, store? }`.
- * A legacy `TLStoreSnapshot` has `{ schema, store }`. We require at
- * minimum an own `schema` property — that's the field tldraw uses to
- * version the format, and it's present in every snapshot tldraw has
- * ever produced. Without it, `loadSnapshot` throws deep in its
- * migration code with an unhelpful error.
+ * The app has historically saved `getSnapshot(store)` output:
+ * `{ document: { schema, store }, session }`. Official `.tldr` files
+ * instead use `{ tldrawFileFormatVersion, schema, records }`. We also
+ * accept a bare `{ schema, store }` snapshot for older internal files.
  */
 function isTldrawSnapshotShape(parsed: unknown): parsed is Partial<TLEditorSnapshot> | TLStoreSnapshot {
   if (!parsed || typeof parsed !== 'object') return false
   // Arrays are objects in JS — exclude them explicitly.
   if (Array.isArray(parsed)) return false
   const obj = parsed as Record<string, unknown>
-  return 'schema' in obj && typeof obj.schema === 'object'
+
+  if (typeof obj.schema === 'object' && !!obj.schema && typeof obj.store === 'object' && !!obj.store) {
+    return true
+  }
+
+  const document = obj.document
+  if (!document || typeof document !== 'object' || Array.isArray(document)) return false
+  const documentObj = document as Record<string, unknown>
+  return (
+    typeof documentObj.schema === 'object' &&
+    !!documentObj.schema &&
+    typeof documentObj.store === 'object' &&
+    !!documentObj.store
+  )
+}
+
+function isTldrawFileData(parsed: unknown): parsed is TldrawFileData {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false
+  const obj = parsed as Record<string, unknown>
+  return (
+    typeof obj.tldrawFileFormatVersion === 'number' &&
+    typeof obj.schema === 'object' &&
+    !!obj.schema &&
+    Array.isArray(obj.records) &&
+    obj.records.every(isRecordObject)
+  )
+}
+
+function tldrawFileToStoreSnapshot(file: TldrawFileData): TLStoreSnapshot {
+  return ({
+    schema: file.schema,
+    store: Object.fromEntries(file.records.map((record) => [record.id, record]))
+  } as unknown) as TLStoreSnapshot
+}
+
+function serializeStoreAsTldrawFile(store: ReturnType<typeof createTLStore>): string {
+  const records = store.allRecords()
+  return JSON.stringify({
+    tldrawFileFormatVersion: 1,
+    schema: store.schema.serialize(),
+    records
+  })
 }
 
 /**
@@ -87,6 +142,9 @@ function parseSnapshot(raw: string): Partial<TLEditorSnapshot> | TLStoreSnapshot
   if (!trimmed) return null
   try {
     const parsed: unknown = JSON.parse(trimmed)
+    if (isTldrawFileData(parsed)) {
+      return tldrawFileToStoreSnapshot(parsed)
+    }
     if (isTldrawSnapshotShape(parsed)) {
       return parsed
     }
@@ -100,7 +158,8 @@ function parseSnapshot(raw: string): Partial<TLEditorSnapshot> | TLStoreSnapshot
 export function WhiteboardEditor({
   value,
   onChange,
-  className
+  className,
+  onReady
 }: WhiteboardEditorProps): JSX.Element {
   // Build one store per mount. Parent uses key={filePath} so a store
   // never survives a file switch — no need to hot-swap contents.
@@ -124,8 +183,64 @@ export function WhiteboardEditor({
 
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+  const editorRef = useRef<TldrawEditor | null>(null)
   const lastSerialisedRef = useRef<string | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  if (lastSerialisedRef.current === null) {
+    try {
+      lastSerialisedRef.current = serializeStoreAsTldrawFile(store)
+    } catch {
+      // If tldraw cannot serialise during initialisation, the next
+      // real document change will try again and surface a warning.
+    }
+  }
+
+  const flush = useCallback(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current)
+      debounceRef.current = null
+    }
+    try {
+      const serialised = serializeStoreAsTldrawFile(store)
+      if (serialised === lastSerialisedRef.current) return
+      lastSerialisedRef.current = serialised
+      onChangeRef.current(serialised)
+    } catch (err) {
+      console.warn('[Whiteboard] serialisation error:', err)
+    }
+  }, [store])
+
+  const exportPng = useCallback(async (): Promise<Blob | null> => {
+    const editor = editorRef.current
+    if (!editor) return null
+
+    flush()
+
+    const shapes = editor.getCurrentPageShapes()
+    if (shapes.length === 0) return null
+
+    const result = await editor.toImage(shapes, {
+      format: 'png',
+      background: true,
+      padding: 32,
+      pixelRatio: 2,
+      darkMode: document.documentElement.getAttribute('data-theme') === 'dark'
+    })
+    return result.blob
+  }, [flush])
+
+  useEffect(() => {
+    const handle: WhiteboardEditorHandle = { flush, exportPng }
+    onReady?.(handle)
+    return () => onReady?.(null)
+  }, [exportPng, flush, onReady])
+
+  useEffect(() => {
+    const handleFlush = () => flush()
+    window.addEventListener('flux:flush-active-editor', handleFlush)
+    return () => window.removeEventListener('flux:flush-active-editor', handleFlush)
+  }, [flush])
 
   // Subscribe to document changes and serialise back to the parent —
   // debounced so a single brush stroke (which fires many change
@@ -136,8 +251,7 @@ export function WhiteboardEditor({
         if (debounceRef.current) clearTimeout(debounceRef.current)
         debounceRef.current = setTimeout(() => {
           try {
-            const snapshot = getSnapshot(store)
-            const serialised = JSON.stringify(snapshot)
+            const serialised = serializeStoreAsTldrawFile(store)
             if (serialised === lastSerialisedRef.current) return
             lastSerialisedRef.current = serialised
             onChangeRef.current(serialised)
@@ -149,35 +263,33 @@ export function WhiteboardEditor({
       // Only fire for document (persistent) changes — otherwise cursor
       // movement, camera pans etc. would mark the file dirty on every
       // pixel of interaction.
-      { source: 'user', scope: 'document' }
+      { scope: 'document' }
     )
     return () => {
       // Flush any pending debounced change before unmounting so the last
       // stroke isn't lost when the user switches files quickly.
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current)
-        debounceRef.current = null
-        try {
-          const snapshot = getSnapshot(store)
-          const serialised = JSON.stringify(snapshot)
-          if (serialised !== lastSerialisedRef.current) {
-            lastSerialisedRef.current = serialised
-            onChangeRef.current(serialised)
-          }
-        } catch {
-          // best-effort
-        }
-      }
+      flush()
       unlisten()
     }
-  }, [store])
+  }, [flush, store])
 
   return (
     <div
       className={`whiteboard-editor-wrapper ${className || ''}`}
       style={{ width: '100%', height: '100%', position: 'relative' }}
     >
-      <Tldraw store={store} licenseKey={TLDRAW_LICENSE_KEY} />
+      <Tldraw
+        store={store}
+        licenseKey={TLDRAW_LICENSE_KEY}
+        initialState="draw"
+        onMount={(editor) => {
+          editorRef.current = editor
+          editor.setCurrentTool('draw')
+          return () => {
+            editorRef.current = null
+          }
+        }}
+      />
     </div>
   )
 }

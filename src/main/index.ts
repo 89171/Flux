@@ -142,19 +142,23 @@ function buildMenu(): void {
     {
       label: 'File',
       submenu: [
+        // No accelerators on these click-based items. A bare CmdOrControl
+        // +<letter> menu accelerator false-triggers on the plain letter
+        // while a non-Latin IME (e.g. Chinese Pinyin) is composing — the
+        // same class of bug that forced us to drop the CmdOrControl+,
+        // accelerator on Preferences below. The shortcuts are owned by the
+        // renderer keydown handlers (App.tsx / Editor.tsx) instead, which
+        // skip IME composition via `e.isComposing`.
         {
           label: 'New File',
-          accelerator: 'CmdOrControl+N',
           click: () => sendMenuAction('new-file')
         },
         {
           label: 'Open Folder',
-          accelerator: 'CmdOrControl+O',
           click: () => sendMenuAction('open-folder')
         },
         {
           label: 'Save',
-          accelerator: 'CmdOrControl+S',
           click: () => sendMenuAction('save')
         },
         { type: 'separator' },
@@ -172,14 +176,15 @@ function buildMenu(): void {
         { role: 'paste' },
         { role: 'selectAll', label: 'Select All' },
         { type: 'separator' },
+        // Accelerators omitted — see the File-menu note. Find/Replace are
+        // handled in the renderer (Editor.tsx) with an IME guard so a bare
+        // 'f' / 'h' during Pinyin composition can't open these dialogs.
         {
           label: 'Find',
-          accelerator: 'CmdOrControl+F',
           click: () => sendMenuAction('find')
         },
         {
           label: 'Replace',
-          accelerator: 'CmdOrControl+H',
           click: () => sendMenuAction('replace')
         }
       ]
@@ -191,9 +196,13 @@ function buildMenu(): void {
     {
       label: 'Go',
       submenu: [
+        // Quick Open uses a bare CmdOrControl+P → accelerator dropped (see
+        // File-menu note); it's handled in App.tsx with an IME guard.
+        // The Shift-combo shortcuts below keep their accelerators — they
+        // require Shift, so a plain letter typed during IME composition
+        // can't match them.
         {
           label: 'Quick Open',
-          accelerator: 'CmdOrControl+P',
           click: () => sendMenuAction('quick-open')
         },
         {

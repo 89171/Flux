@@ -113,6 +113,19 @@ export class WindowManager {
       autoCollapse = false
     } = opts
 
+    const existing = this.noteWindows.get(noteId)
+    if (existing && !existing.window.isDestroyed()) {
+      if (isPinned) {
+        this.pinNote(noteId, opacity)
+      }
+      if (autoCollapse) {
+        this.setAutoCollapse(noteId, true)
+      }
+      existing.window.show()
+      existing.window.focus()
+      return existing.window
+    }
+
     const windowOptions: BrowserWindowConstructorOptions = {
       width: NOTE_WINDOW_DEFAULT_WIDTH,
       height: NOTE_WINDOW_DEFAULT_HEIGHT,
@@ -172,6 +185,13 @@ export class WindowManager {
     win.on('focus', () => {
       if (managed.isPinned) {
         win.setAlwaysOnTop(true, 'floating')
+      }
+    })
+
+    win.on('closed', () => {
+      this.cleanupNoteWindow(managed)
+      if (this.noteWindows.get(noteId)?.window === win) {
+        this.noteWindows.delete(noteId)
       }
     })
 
@@ -403,26 +423,29 @@ export class WindowManager {
     const managed = this.noteWindows.get(noteId)
     if (!managed) return
 
-    if (managed.collapseTimer) {
-      clearTimeout(managed.collapseTimer)
+    if (managed.window.isDestroyed()) {
+      this.cleanupNoteWindow(managed)
+      this.noteWindows.delete(noteId)
+      return
     }
-    this.stopExpandCheck(noteId)
-    this.teardownAutoCollapse(managed)
-
     managed.window.close()
-    this.noteWindows.delete(noteId)
   }
 
   closeAllNoteWindows(): void {
-    for (const [noteId, managed] of this.noteWindows) {
-      if (managed.collapseTimer) {
-        clearTimeout(managed.collapseTimer)
+    for (const managed of this.noteWindows.values()) {
+      if (!managed.window.isDestroyed()) {
+        managed.window.close()
       }
-      this.stopExpandCheck(noteId)
-      this.teardownAutoCollapse(managed)
-      managed.window.close()
     }
-    this.noteWindows.clear()
+  }
+
+  private cleanupNoteWindow(managed: ManagedWindow): void {
+    if (managed.collapseTimer) {
+      clearTimeout(managed.collapseTimer)
+      managed.collapseTimer = null
+    }
+    this.stopExpandCheck(managed.noteId)
+    this.teardownAutoCollapse(managed)
   }
 
   async setAutoLaunch(enabled: boolean): Promise<void> {

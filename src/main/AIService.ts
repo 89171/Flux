@@ -71,6 +71,22 @@ const FLUX_TOOLS = [
   }
 ]
 
+/**
+ * System prompt used ONLY for the tool-detection probe. It's deliberately
+ * narrow and forceful so OpenAI-compatible models (incl. DeepSeek) reliably
+ * emit a create_file tool call when the user asks to create/generate/save a
+ * document — instead of just answering with the content inline. Kept
+ * separate from the format prompts so it works no matter which file (if any)
+ * is currently open. The user's request may be in any language.
+ */
+const FILE_TOOL_SYSTEM_PROMPT = `You are the file-creation controller for the Flux note app. You have one tool: create_file.
+
+Decide ONLY whether the user's latest message is asking to create, generate, write, or save a new document/file. Examples that MUST trigger create_file: "创建一个Markdown文档…", "帮我生成一个关于X的文件", "写一篇…保存为md", "create a markdown doc about X", "make a todo board for …".
+
+Rules:
+- If it is such a request, you MUST call create_file exactly once. Choose a concise filename relative to the workspace root with the correct extension (.md for markdown/articles, .todo for kanban, .mmd for mermaid, .puml for plantuml, .drawio, .mindmap, .bpmn, .dmn). Put the FULL requested document into the content argument. Do not ask for confirmation.
+- If the message is a normal question or chat that does not ask to create a file, do NOT call any tool and reply with an empty message.`
+
 export class AIService {
   conversations: Map<string, AIConversation> = new Map()
   activeRequests: Map<string, AbortController> = new Map()
@@ -275,7 +291,14 @@ export class AIService {
         this.provider !== 'local' &&
         this.provider !== 'none'
       ) {
-        const toolsResult = await this.callAIWithTools(apiMessages, abortController.signal)
+        // Probe with a narrow, tool-focused system prompt (not the format
+        // prompt) so the model reliably decides to call create_file. Keep
+        // the conversation turns for context, drop the original system msg.
+        const probeMessages: AIMessageEntry[] = [
+          { role: 'system', content: FILE_TOOL_SYSTEM_PROMPT },
+          ...apiMessages.filter((m) => m.role !== 'system')
+        ]
+        const toolsResult = await this.callAIWithTools(probeMessages, abortController.signal)
         if (toolsResult.toolCalls && toolsResult.toolCalls.length > 0) {
           apiMessages = [
             ...apiMessages,
@@ -664,7 +687,22 @@ export class AIService {
         }),
         signal
       })
-      if (!response.ok) return { content: '' }
+      if (!response.ok) {
+        // Don't swallow — a 400 here usually means the configured model
+        // doesn't support function calling (e.g. deepseek-reasoner) or the
+        // key/baseUrl is wrong. Log it so file-creation failures are
+        // diagnosable instead of silently degrading to a plain answer.
+        let body = ''
+        try {
+          body = await response.text()
+        } catch {
+          /* ignore */
+        }
+        console.warn(
+          `[AIService] tool probe failed: ${response.status} ${response.statusText} — ${body.slice(0, 500)}`
+        )
+        return { content: '' }
+      }
       const data = (await response.json()) as {
         choices: Array<{
           message: {
@@ -678,8 +716,18 @@ export class AIService {
         }>
       }
       const msg = data.choices[0]?.message
-      return { content: msg?.content || '', toolCalls: msg?.tool_calls }
-    } catch {
+      const toolCalls = msg?.tool_calls
+      if (!toolCalls || toolCalls.length === 0) {
+        console.log('[AIService] tool probe returned no tool_calls (model chose not to create a file)')
+      } else {
+        console.log(`[AIService] tool probe requested ${toolCalls.length} tool call(s): ${toolCalls.map((t) => t.function.name).join(', ')}`)
+      }
+      return { content: msg?.content || '', toolCalls }
+    } catch (err) {
+      // AbortError is expected on cancel; anything else is worth logging.
+      if (!(err instanceof Error) || err.name !== 'AbortError') {
+        console.warn('[AIService] tool probe threw:', err)
+      }
       return { content: '' }
     }
   }

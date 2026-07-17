@@ -165,6 +165,14 @@ export default function App() {
       if (e.isComposing || e.keyCode === 229) return
       const mod = e.metaKey || e.ctrlKey
       if (!mod) return
+      // Ctrl+O - Open Folder. The native menu accelerator was dropped to
+      // avoid the Chinese-IME bare-letter false-trigger; handled here where
+      // the `isComposing` guard above protects it.
+      if (mod && !e.shiftKey && e.key === 'o') {
+        e.preventDefault()
+        useFileStore.getState().openFolder()
+        return
+      }
       // Ctrl+P - Quick Open (not Shift+P which is Command Palette)
       if (mod && !e.shiftKey && e.key === 'p') {
         e.preventDefault()
@@ -265,7 +273,10 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const handler = () => setAiPanelOpen((v) => !v)
+    const handler = () => {
+      setView('editor')
+      setAiPanelOpen((v) => !v)
+    }
     window.addEventListener('flux:toggle-ai', handler)
     return () => window.removeEventListener('flux:toggle-ai', handler)
   }, [])

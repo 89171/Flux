@@ -11,6 +11,8 @@ import type {
   FileReadMetaResult,
   FileWriteResult,
   FileChangedEvent,
+  FileHistoryEntry,
+  FileHistoryReadResult,
   SearchResult,
   UpdateCheckResult
 } from '../shared/types'
@@ -43,12 +45,30 @@ const api = {
     rename: (oldPath: string, newPath: string): Promise<NoteFile> => ipcRenderer.invoke(IPC.FILE_RENAME, oldPath, newPath),
     move: (sourcePath: string, targetDir: string): Promise<NoteFile> => ipcRenderer.invoke(IPC.FILE_MOVE, sourcePath, targetDir),
     openExternal: (path: string): Promise<boolean> => ipcRenderer.invoke(IPC.FILE_OPEN_EXTERNAL, path),
+    revealInFolder: (path: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.FILE_REVEAL_IN_FOLDER, path),
+    history: {
+      list: (path: string): Promise<FileHistoryEntry[]> =>
+        ipcRenderer.invoke(IPC.FILE_HISTORY_LIST, path),
+      read: (path: string, id: string): Promise<FileHistoryReadResult> =>
+        ipcRenderer.invoke(IPC.FILE_HISTORY_READ, path, id),
+      restore: (path: string, id: string): Promise<FileReadMetaResult> =>
+        ipcRenderer.invoke(IPC.FILE_HISTORY_RESTORE, path, id)
+    },
     search: (query: string, maxResults?: number): Promise<SearchResult[]> =>
       ipcRenderer.invoke(IPC.FILE_SEARCH, query, maxResults),
     exportPDF: (content: string, fileName: string): Promise<string | null> =>
       ipcRenderer.invoke(IPC.FILE_EXPORT_PDF, content, fileName),
     exportHTML: (content: string, fileName: string): Promise<string | null> =>
-      ipcRenderer.invoke(IPC.FILE_EXPORT_HTML, content, fileName)
+      ipcRenderer.invoke(IPC.FILE_EXPORT_HTML, content, fileName),
+    exportData: (opts: {
+      title?: string
+      defaultPath: string
+      filters?: Array<{ name: string; extensions: string[] }>
+      data: string
+      encoding?: 'utf8' | 'base64'
+    }): Promise<string | null> =>
+      ipcRenderer.invoke(IPC.FILE_EXPORT_DATA, opts)
   },
   window: {
     openNote: (opts: { noteId: string; notePath: string; noteName: string; format: string; content?: string; isPinned?: boolean; opacity?: number; autoCollapse?: boolean }): Promise<unknown> => ipcRenderer.invoke(IPC.WINDOW_OPEN_NOTE, opts),
@@ -58,7 +78,7 @@ const api = {
     setOpacity: (noteId: string, opacity: number): Promise<boolean> => ipcRenderer.invoke(IPC.WINDOW_SET_OPACITY, noteId, opacity),
     setAutoCollapse: (noteId: string, enabled: boolean): Promise<boolean> => ipcRenderer.invoke(IPC.WINDOW_SET_AUTO_COLLAPSE, noteId, enabled),
     close: (noteId?: string): Promise<boolean> => ipcRenderer.invoke(IPC.WINDOW_CLOSE, noteId),
-    minimize: (): Promise<boolean> => ipcRenderer.invoke(IPC.WINDOW_MINIMIZE),
+    minimize: (noteId?: string): Promise<boolean> => ipcRenderer.invoke(IPC.WINDOW_MINIMIZE, noteId),
     setAutoLaunch: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke(IPC.WINDOW_AUTO_LAUNCH, enabled),
     minimizeFrame: () => ipcRenderer.send('window:minimize'),
     closeFrame: () => ipcRenderer.send('window:close'),

@@ -10,9 +10,10 @@
  * than trapping the user in a broken canvas.
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Excalidraw,
+  exportToBlob,
   serializeAsJSON,
   restore
 } from '@excalidraw/excalidraw'
@@ -31,6 +32,11 @@ export interface ExcalidrawEditorProps {
   value: string
   onChange: (data: string) => void
   className?: string
+  onReady?: (handle: ExcalidrawEditorHandle | null) => void
+}
+
+export interface ExcalidrawEditorHandle {
+  exportPng: () => Promise<Blob | null>
 }
 
 /**
@@ -61,7 +67,8 @@ function parseInitialData(raw: string): ExcalidrawInitialDataState | null {
 export function ExcalidrawEditor({
   value,
   onChange,
-  className
+  className,
+  onReady
 }: ExcalidrawEditorProps): JSX.Element {
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
   const onChangeRef = useRef(onChange)
@@ -72,6 +79,29 @@ export function ExcalidrawEditor({
   // Parent uses `key={filePath}` so we re-mount when files switch;
   // computing initial data once is safe and matches other builtins.
   const initialData = useMemo(() => parseInitialData(value), [])
+
+  const exportPng = useCallback(async (): Promise<Blob | null> => {
+    const api = apiRef.current
+    if (!api) return null
+    const elements = api.getSceneElements()
+    if (elements.length === 0) return null
+
+    return exportToBlob({
+      elements,
+      appState: {
+        ...api.getAppState(),
+        exportBackground: true
+      },
+      files: api.getFiles(),
+      mimeType: 'image/png',
+      exportPadding: 24
+    })
+  }, [])
+
+  useEffect(() => {
+    onReady?.({ exportPng })
+    return () => onReady?.(null)
+  }, [exportPng, onReady])
 
   const handleChange = useCallback(
     (
@@ -106,6 +136,9 @@ export function ExcalidrawEditor({
       <Excalidraw
         excalidrawAPI={(api) => {
           apiRef.current = api
+          if (!api) {
+            onReady?.(null)
+          }
         }}
         initialData={initialData ?? undefined}
         onChange={handleChange}

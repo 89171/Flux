@@ -6,7 +6,7 @@
  * Features: drag & drop files, keyboard save shortcut, AI generate, pin to desktop.
  */
 
-import { Component, useCallback, useState, useEffect, lazy, Suspense, type ReactNode } from 'react'
+import { Component, useCallback, useState, useEffect, lazy, Suspense, useRef, type ReactNode } from 'react'
 import {
   Save,
   Pin,
@@ -14,13 +14,20 @@ import {
   Sparkles,
   FileText,
   List as ListIcon,
-  Download
+  Download,
+  ChevronDown,
+  History as HistoryIcon
 } from 'lucide-react'
 import MarkdownEditor from './MilkdownEditor'
 import PluginIframeEditor from './PluginIframeEditor'
 import CodeMirrorEditor from './CodeMirrorEditor'
 import Outline from './Outline'
 import EditorContextMenu, { type ContextMenuItem } from './EditorContextMenu'
+import FileHistoryDialog from './FileHistoryDialog'
+import type { DrawioEditorHandle } from './DrawioEditor'
+import type { MindmapEditorHandle } from './MindmapEditor'
+import type { WhiteboardEditorHandle } from './WhiteboardEditor'
+import type { ExcalidrawEditorHandle } from './ExcalidrawEditor'
 // Heavy editors are code-split so users who never open these file types
 // don't pay the download cost. Vite emits a separate chunk per import().
 //  - DrawioEditor     : minimal (iframe), but kept lazy for consistency
@@ -42,10 +49,19 @@ const MermaidEditor = lazy(() => import('./MermaidEditor'))
 const BpmnEditor = lazy(() => import('./BpmnEditor'))
 const DmnEditor = lazy(() => import('./DmnEditor'))
 import { useFileStore } from '../stores/fileStore'
-import { useAIStore } from '../stores/aiStore'
 import { usePluginStore } from '../stores/pluginStore'
 import FindReplace from './FindReplace'
 import type { FormatBinding, NoteFormat } from '@shared/types'
+import {
+  blobToBase64,
+  buildStandaloneHtml,
+  escapeHtml,
+  getExportBaseName,
+  getFileExtension,
+  saveBlobExport,
+  saveTextExport,
+  svgToPngBlob
+} from '../utils/exportUtils'
 
 /**
  * Error boundary that catches chunk-load failures (network) and runtime
@@ -193,6 +209,12 @@ const MIN_FONT_SIZE = 10
 const MAX_FONT_SIZE = 28
 const FONT_SIZE_STEP = 2
 
+interface ExportOption {
+  label: string
+  action: () => Promise<void>
+  disabled?: boolean
+}
+
 export default function Editor(): JSX.Element {
   const currentFile = useFileStore((s) => s.currentFile)
   const currentContent = useFileStore((s) => s.currentContent)
@@ -204,7 +226,6 @@ export default function Editor(): JSX.Element {
   const reloadCurrent = useFileStore((s) => s.reloadCurrent)
   const fileError = useFileStore((s) => s.fileError)
   const clearError = useFileStore((s) => s.clearError)
-  const isGenerating = useAIStore((s) => s.isGenerating)
   const formatMap = usePluginStore((s) => s.formatMap)
 
   const [isDragOver, setIsDragOver] = useState(false)
@@ -213,10 +234,15 @@ export default function Editor(): JSX.Element {
   const [showFindReplace, setShowFindReplace] = useState(false)
   const [findReplaceMode, setFindReplaceMode] = useState<'find' | 'replace'>('find')
   const [showOutline, setShowOutline] = useState(false)
+  const [showExportMenu, setShowExportMenu] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null)
-  // Bumped whenever the user clicks "retry" in the error boundary —
-  // forces a remount of the lazy editor subtree.
+  // Bumped when the active editor needs to re-read file contents.
   const [rendererKey, setRendererKey] = useState(0)
+  const drawioHandleRef = useRef<DrawioEditorHandle | null>(null)
+  const mindmapHandleRef = useRef<MindmapEditorHandle | null>(null)
+  const whiteboardHandleRef = useRef<WhiteboardEditorHandle | null>(null)
+  const excalidrawHandleRef = useRef<ExcalidrawEditorHandle | null>(null)
 
   // Look up the binding for the currently open file. The binding drives
   // which editor gets mounted; the string `format` field on NoteFile is
@@ -227,7 +253,50 @@ export default function Editor(): JSX.Element {
     : undefined
   const isMarkdown =
     currentBinding?.kind === 'builtin' && currentBinding.renderer === 'markdown'
+  const currentRenderer = currentBinding?.kind === 'builtin' ? currentBinding.renderer : undefined
   const format = currentFile?.format
+
+  useEffect(() => {
+    drawioHandleRef.current = null
+    mindmapHandleRef.current = null
+    whiteboardHandleRef.current = null
+    excalidrawHandleRef.current = null
+  }, [currentFile?.path])
+
+  const handleDrawioReady = useCallback((handle: DrawioEditorHandle | null) => {
+    drawioHandleRef.current = handle
+  }, [])
+
+  const handleMindmapReady = useCallback((handle: MindmapEditorHandle | null) => {
+    mindmapHandleRef.current = handle
+  }, [])
+
+  const handleWhiteboardReady = useCallback((handle: WhiteboardEditorHandle | null) => {
+    whiteboardHandleRef.current = handle
+  }, [])
+
+  const handleExcalidrawReady = useCallback((handle: ExcalidrawEditorHandle | null) => {
+    excalidrawHandleRef.current = handle
+  }, [])
+
+  const setContentForFile = useCallback(
+    (filePath: string, content: string) => {
+      const activeFile = useFileStore.getState().currentFile
+      if (activeFile?.path !== filePath) return
+      setContent(content)
+    },
+    [setContent]
+  )
+
+  const forceEditorRemount = useCallback(() => {
+    setRendererKey((key) => key + 1)
+  }, [])
+
+  useEffect(() => {
+    const handler = () => forceEditorRemount()
+    window.addEventListener('flux:force-editor-remount', handler)
+    return () => window.removeEventListener('flux:force-editor-remount', handler)
+  }, [forceEditorRemount])
 
   // Keyboard shortcuts: Cmd/Ctrl+S to save, Cmd/Ctrl+/-/0 to zoom, Cmd/Ctrl+F/H find/replace
   useEffect(() => {
@@ -286,6 +355,13 @@ export default function Editor(): JSX.Element {
     }
   }, [])
 
+  useEffect(() => {
+    if (!showExportMenu) return
+    const close = () => setShowExportMenu(false)
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [showExportMenu])
+
   // Drag & drop external files
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -328,6 +404,11 @@ export default function Editor(): JSX.Element {
   const handleAIGenerate = useCallback(() => {
     window.dispatchEvent(new CustomEvent('flux:toggle-ai'))
   }, [])
+
+  const handleOpenHistory = useCallback(() => {
+    if (!currentFile) return
+    setShowHistory(true)
+  }, [currentFile])
 
   // Pin to Desktop handler - opens a pinned note window
   const handlePin = useCallback(async () => {
@@ -384,6 +465,265 @@ export default function Editor(): JSX.Element {
     }
   }, [currentFile, currentContent])
 
+  const handleExportSource = useCallback(async () => {
+    if (!currentFile) return
+    window.dispatchEvent(new CustomEvent('flux:flush-active-editor'))
+    const activeState = useFileStore.getState()
+    const exportContent =
+      activeState.currentFile?.path === currentFile.path
+        ? activeState.currentContent
+        : currentContent
+    const ext = getFileExtension(currentFile.name)
+    try {
+      await saveTextExport({
+        title: '导出源文件',
+        defaultPath: currentFile.name,
+        filters: [
+          { name: `${ext.toUpperCase()} Source`, extensions: [ext] },
+          { name: 'All Files', extensions: ['*'] }
+        ],
+        data: exportContent
+      })
+    } catch (err) {
+      console.error('Export source failed:', err)
+    }
+  }, [currentFile, currentContent])
+
+  const handleExportTextHTML = useCallback(async () => {
+    if (!currentFile) return
+    try {
+      await saveTextExport({
+        title: '导出 HTML',
+        defaultPath: `${getExportBaseName(currentFile.name)}.html`,
+        filters: [{ name: 'HTML', extensions: ['html'] }],
+        data: buildStandaloneHtml(
+          currentFile.name,
+          `<pre>${escapeHtml(currentContent)}</pre>`
+        )
+      })
+    } catch (err) {
+      console.error('Export text HTML failed:', err)
+    }
+  }, [currentFile, currentContent])
+
+  const renderMermaidSvg = useCallback(async (): Promise<string> => {
+    const trimmed = currentContent.trim()
+    if (!trimmed) throw new Error('Mermaid content is empty')
+    const mermaid = (await import('mermaid')).default
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default',
+      securityLevel: 'strict',
+      suppressErrorRendering: true
+    })
+    const id = `mmd-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const result = await mermaid.render(id, trimmed)
+    return result.svg
+  }, [currentContent])
+
+  const handleExportMermaidSVG = useCallback(async () => {
+    if (!currentFile) return
+    try {
+      await saveTextExport({
+        title: '导出 SVG',
+        defaultPath: `${getExportBaseName(currentFile.name)}.svg`,
+        filters: [{ name: 'SVG', extensions: ['svg'] }],
+        data: await renderMermaidSvg()
+      })
+    } catch (err) {
+      console.error('Export Mermaid SVG failed:', err)
+    }
+  }, [currentFile, renderMermaidSvg])
+
+  const handleExportMermaidPNG = useCallback(async () => {
+    if (!currentFile) return
+    try {
+      const svg = await renderMermaidSvg()
+      const blob = await svgToPngBlob(
+        svg,
+        2,
+        document.documentElement.getAttribute('data-theme') === 'dark' ? '#1a1a1a' : '#ffffff'
+      )
+      await saveBlobExport({
+        title: '导出 PNG',
+        defaultPath: `${getExportBaseName(currentFile.name)}.png`,
+        filters: [{ name: 'PNG', extensions: ['png'] }],
+        blob
+      })
+    } catch (err) {
+      console.error('Export Mermaid PNG failed:', err)
+    }
+  }, [currentFile, renderMermaidSvg])
+
+  const handleExportMermaidHTML = useCallback(async () => {
+    if (!currentFile) return
+    try {
+      const svg = await renderMermaidSvg()
+      await saveTextExport({
+        title: '导出 HTML',
+        defaultPath: `${getExportBaseName(currentFile.name)}.html`,
+        filters: [{ name: 'HTML', extensions: ['html'] }],
+        data: buildStandaloneHtml(currentFile.name, svg)
+      })
+    } catch (err) {
+      console.error('Export Mermaid HTML failed:', err)
+    }
+  }, [currentFile, renderMermaidSvg])
+
+  const getDrawioPngBlob = useCallback(async (): Promise<Blob> => {
+    const handle = drawioHandleRef.current
+    if (!handle) throw new Error('DrawIO editor is not ready')
+    const blob = await handle.exportPng()
+    if (!blob) throw new Error('DrawIO export is unavailable')
+    return blob
+  }, [])
+
+  const handleExportDrawioPNG = useCallback(async () => {
+    if (!currentFile) return
+    try {
+      await saveBlobExport({
+        title: '导出 PNG',
+        defaultPath: `${getExportBaseName(currentFile.name)}.png`,
+        filters: [{ name: 'PNG', extensions: ['png'] }],
+        blob: await getDrawioPngBlob()
+      })
+    } catch (err) {
+      console.error('Export DrawIO PNG failed:', err)
+    }
+  }, [currentFile, getDrawioPngBlob])
+
+  const getMindmapPngBlob = useCallback(async (): Promise<Blob> => {
+    const handle = mindmapHandleRef.current
+    if (!handle) throw new Error('Mindmap editor is not ready')
+    const blob = await handle.exportPng()
+    if (!blob) throw new Error('Mindmap is empty')
+    return blob
+  }, [])
+
+  const handleExportMindmapPNG = useCallback(async () => {
+    if (!currentFile) return
+    try {
+      await saveBlobExport({
+        title: '导出 PNG',
+        defaultPath: `${getExportBaseName(currentFile.name)}.png`,
+        filters: [{ name: 'PNG', extensions: ['png'] }],
+        blob: await getMindmapPngBlob()
+      })
+    } catch (err) {
+      console.error('Export mindmap PNG failed:', err)
+    }
+  }, [currentFile, getMindmapPngBlob])
+
+  const getExcalidrawPngBlob = useCallback(async (): Promise<Blob> => {
+    const handle = excalidrawHandleRef.current
+    if (!handle) throw new Error('Excalidraw editor is not ready')
+    const blob = await handle.exportPng()
+    if (!blob) throw new Error('Excalidraw scene is empty')
+    return blob
+  }, [])
+
+  const handleExportExcalidrawPNG = useCallback(async () => {
+    if (!currentFile) return
+    try {
+      await saveBlobExport({
+        title: '导出 PNG',
+        defaultPath: `${getExportBaseName(currentFile.name)}.png`,
+        filters: [{ name: 'PNG', extensions: ['png'] }],
+        blob: await getExcalidrawPngBlob()
+      })
+    } catch (err) {
+      console.error('Export Excalidraw PNG failed:', err)
+    }
+  }, [currentFile, getExcalidrawPngBlob])
+
+  const getWhiteboardPngBlob = useCallback(async (): Promise<Blob> => {
+    const handle = whiteboardHandleRef.current
+    if (!handle) throw new Error('Whiteboard editor is not ready')
+    const blob = await handle.exportPng()
+    if (!blob) throw new Error('Whiteboard is empty')
+    return blob
+  }, [])
+
+  const handleExportWhiteboardPNG = useCallback(async () => {
+    if (!currentFile) return
+    try {
+      await saveBlobExport({
+        title: '导出 PNG',
+        defaultPath: `${getExportBaseName(currentFile.name)}.png`,
+        filters: [{ name: 'PNG', extensions: ['png'] }],
+        blob: await getWhiteboardPngBlob()
+      })
+    } catch (err) {
+      console.error('Export whiteboard PNG failed:', err)
+    }
+  }, [currentFile, getWhiteboardPngBlob])
+
+  const handleExportWhiteboardHTML = useCallback(async () => {
+    if (!currentFile) return
+    try {
+      const pngBlob = await getWhiteboardPngBlob()
+      const base64 = await blobToBase64(pngBlob)
+      await saveTextExport({
+        title: '导出 HTML',
+        defaultPath: `${getExportBaseName(currentFile.name)}.html`,
+        filters: [{ name: 'HTML', extensions: ['html'] }],
+        data: buildStandaloneHtml(
+          currentFile.name,
+          `<img src="data:image/png;base64,${base64}" alt="${escapeHtml(currentFile.name)}">`
+        )
+      })
+    } catch (err) {
+      console.error('Export whiteboard HTML failed:', err)
+    }
+  }, [currentFile, getWhiteboardPngBlob])
+
+  const exportOptions: ExportOption[] = []
+  if (currentFile) {
+    if (isMarkdown) {
+      exportOptions.push(
+        { label: 'HTML', action: handleExportHTML },
+        { label: 'PDF', action: handleExportPDF },
+        { label: 'Markdown 源文件', action: handleExportSource }
+      )
+    } else if (currentRenderer === 'mermaid') {
+      exportOptions.push(
+        { label: 'SVG', action: handleExportMermaidSVG, disabled: !currentContent.trim() },
+        { label: 'PNG', action: handleExportMermaidPNG, disabled: !currentContent.trim() },
+        { label: 'HTML', action: handleExportMermaidHTML, disabled: !currentContent.trim() },
+        { label: 'Mermaid 源文件', action: handleExportSource }
+      )
+    } else if (currentRenderer === 'whiteboard') {
+      exportOptions.push(
+        { label: 'PNG', action: handleExportWhiteboardPNG },
+        { label: 'HTML', action: handleExportWhiteboardHTML },
+        { label: 'tldraw 源文件', action: handleExportSource }
+      )
+    } else if (currentRenderer === 'drawio') {
+      exportOptions.push(
+        { label: 'PNG', action: handleExportDrawioPNG },
+        { label: '源文件', action: handleExportSource },
+        { label: 'HTML', action: handleExportTextHTML }
+      )
+    } else if (currentRenderer === 'mindmap') {
+      exportOptions.push(
+        { label: 'PNG', action: handleExportMindmapPNG },
+        { label: '源文件', action: handleExportSource },
+        { label: 'HTML', action: handleExportTextHTML }
+      )
+    } else if (currentRenderer === 'excalidraw') {
+      exportOptions.push(
+        { label: 'PNG', action: handleExportExcalidrawPNG },
+        { label: '源文件', action: handleExportSource },
+        { label: 'HTML', action: handleExportTextHTML }
+      )
+    } else {
+      exportOptions.push(
+        { label: '源文件', action: handleExportSource },
+        { label: 'HTML', action: handleExportTextHTML }
+      )
+    }
+  }
+
   // Context menu
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -409,18 +749,19 @@ export default function Editor(): JSX.Element {
         label: showOutline ? 'Hide Outline' : 'Show Outline',
         action: () => setShowOutline((v) => !v)
       })
+    }
+    if (exportOptions.length > 0) {
       items.push({ label: '', action: () => {}, separator: true })
-      items.push({
-        label: 'Export as HTML',
-        action: handleExportHTML
-      })
-      items.push({
-        label: 'Export as PDF',
-        action: handleExportPDF
-      })
+      for (const option of exportOptions) {
+        items.push({
+          label: `Export as ${option.label}`,
+          action: () => { void option.action() },
+          disabled: option.disabled
+        })
+      }
     }
     setContextMenu({ x: e.clientX, y: e.clientY, items })
-  }, [saveFile, isDirty, isMarkdown, showOutline, handleExportHTML, handleExportPDF])
+  }, [saveFile, isDirty, isMarkdown, showOutline, exportOptions])
 
   /**
    * Render the inner editor for the active binding. The outer
@@ -444,7 +785,7 @@ export default function Editor(): JSX.Element {
           key={file.path}
           entryUrl={currentBinding.entryUrl}
           value={currentContent}
-          onChange={setContent}
+          onChange={(data) => setContentForFile(file.path, data)}
           onRequestSave={saveFile}
           filePath={file.path}
           mtime={currentMtime}
@@ -456,7 +797,7 @@ export default function Editor(): JSX.Element {
         <MarkdownEditor
           key={file.path}
           value={currentContent}
-          onChange={(md) => setContent(md)}
+          onChange={(md) => setContentForFile(file.path, md)}
           className="markdown-editor-wrapper"
         />
       )
@@ -468,8 +809,9 @@ export default function Editor(): JSX.Element {
             <DrawioEditor
               key={file.path}
               value={currentContent}
-              onChange={(xml) => setContent(xml)}
+              onChange={(xml) => setContentForFile(file.path, xml)}
               onRequestSave={saveFile}
+              onReady={handleDrawioReady}
               className="drawio-editor-wrapper"
             />
           )
@@ -478,7 +820,8 @@ export default function Editor(): JSX.Element {
             <MindmapEditor
               key={file.path}
               value={currentContent}
-              onChange={(data) => setContent(data)}
+              onChange={(data) => setContentForFile(file.path, data)}
+              onReady={handleMindmapReady}
               className="mindmap-editor-wrapper"
             />
           )
@@ -487,7 +830,8 @@ export default function Editor(): JSX.Element {
             <WhiteboardEditor
               key={file.path}
               value={currentContent}
-              onChange={(data) => setContent(data)}
+              onChange={(data) => setContentForFile(file.path, data)}
+              onReady={handleWhiteboardReady}
               className="whiteboard-editor-wrapper"
             />
           )
@@ -496,7 +840,8 @@ export default function Editor(): JSX.Element {
             <ExcalidrawEditor
               key={file.path}
               value={currentContent}
-              onChange={(data) => setContent(data)}
+              onChange={(data) => setContentForFile(file.path, data)}
+              onReady={handleExcalidrawReady}
               className="excalidraw-editor-wrapper"
             />
           )
@@ -505,7 +850,7 @@ export default function Editor(): JSX.Element {
             <KanbanEditor
               key={file.path}
               value={currentContent}
-              onChange={(data) => setContent(data)}
+              onChange={(data) => setContentForFile(file.path, data)}
               className="kanban-editor-wrapper"
             />
           )
@@ -514,7 +859,7 @@ export default function Editor(): JSX.Element {
             <PlantUmlEditor
               key={file.path}
               value={currentContent}
-              onChange={(data) => setContent(data)}
+              onChange={(data) => setContentForFile(file.path, data)}
               className="plantuml-editor-wrapper"
             />
           )
@@ -523,8 +868,9 @@ export default function Editor(): JSX.Element {
             <MermaidEditor
               key={file.path}
               value={currentContent}
-              onChange={(data) => setContent(data)}
+              onChange={(data) => setContentForFile(file.path, data)}
               className="mermaid-editor-wrapper"
+              fileName={file.name}
             />
           )
         case 'bpmn':
@@ -532,7 +878,7 @@ export default function Editor(): JSX.Element {
             <BpmnEditor
               key={file.path}
               value={currentContent}
-              onChange={(data) => setContent(data)}
+              onChange={(data) => setContentForFile(file.path, data)}
               className="bpmn-editor-wrapper"
             />
           )
@@ -541,7 +887,7 @@ export default function Editor(): JSX.Element {
             <DmnEditor
               key={file.path}
               value={currentContent}
-              onChange={(data) => setContent(data)}
+              onChange={(data) => setContentForFile(file.path, data)}
               className="dmn-editor-wrapper"
             />
           )
@@ -554,7 +900,7 @@ export default function Editor(): JSX.Element {
       <CodeMirrorEditor
         key={file.path}
         value={currentContent}
-        onChange={setContent}
+        onChange={(data) => setContentForFile(file.path, data)}
         fileName={file.name}
         fontSize={fontSize}
       />
@@ -659,7 +1005,7 @@ export default function Editor(): JSX.Element {
             className="editor-toolbar-btn"
             onClick={handleAIGenerate}
             title="AI Generate"
-            disabled={isGenerating}
+            type="button"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -669,7 +1015,7 @@ export default function Editor(): JSX.Element {
               borderRadius: '6px',
               background: 'none',
               color: 'var(--text-secondary)',
-              cursor: isGenerating ? 'wait' : 'pointer',
+              cursor: 'pointer',
               fontSize: '13px'
             }}
           >
@@ -697,6 +1043,24 @@ export default function Editor(): JSX.Element {
 
           <button
             className="editor-toolbar-btn"
+            onClick={handleOpenHistory}
+            title="History"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              padding: '6px',
+              border: 'none',
+              borderRadius: '6px',
+              background: 'none',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer'
+            }}
+          >
+            <HistoryIcon size={15} />
+          </button>
+
+          <button
+            className="editor-toolbar-btn"
             onClick={handlePin}
             title={isPinned ? 'Unpin from Desktop' : 'Pin to Desktop'}
             style={{
@@ -706,7 +1070,7 @@ export default function Editor(): JSX.Element {
               border: 'none',
               borderRadius: '6px',
               background: isPinned ? 'var(--accent-primary)' : 'none',
-              color: isPinned ? '#fff' : 'var(--text-secondary)',
+              color: isPinned ? 'var(--bg-primary)' : 'var(--text-secondary)',
               cursor: 'pointer'
             }}
           >
@@ -733,24 +1097,75 @@ export default function Editor(): JSX.Element {
             </button>
           )}
 
-          {isMarkdown && (
-            <button
-              className="editor-toolbar-btn"
-              onClick={handleExportHTML}
-              title="Export as HTML"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                padding: '6px',
-                border: 'none',
-                borderRadius: '6px',
-                background: 'none',
-                color: 'var(--text-secondary)',
-                cursor: 'pointer'
-              }}
+          {exportOptions.length > 0 && (
+            <div
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              style={{ position: 'relative', display: 'inline-flex' }}
             >
-              <Download size={15} />
-            </button>
+              <button
+                className="editor-toolbar-btn"
+                onClick={() => setShowExportMenu((value) => !value)}
+                title="Export"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '6px 8px',
+                  border: 'none',
+                  borderRadius: '6px',
+                  background: showExportMenu ? 'var(--bg-active)' : 'none',
+                  color: showExportMenu ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  fontSize: 13
+                }}
+              >
+                <Download size={15} />
+                <ChevronDown size={12} />
+              </button>
+              {showExportMenu && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 6px)',
+                    right: 0,
+                    minWidth: 160,
+                    padding: 4,
+                    background: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 8,
+                    boxShadow: 'var(--shadow-lg)',
+                    zIndex: 50
+                  }}
+                >
+                  {exportOptions.map((option) => (
+                    <button
+                      key={option.label}
+                      disabled={option.disabled}
+                      onClick={() => {
+                        setShowExportMenu(false)
+                        void option.action()
+                      }}
+                      style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: '7px 10px',
+                        border: 'none',
+                        borderRadius: 5,
+                        background: 'transparent',
+                        color: option.disabled ? 'var(--text-disabled)' : 'var(--text-primary)',
+                        cursor: option.disabled ? 'default' : 'pointer',
+                        fontSize: 13,
+                        textAlign: 'left'
+                      }}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
           <button
@@ -766,7 +1181,7 @@ export default function Editor(): JSX.Element {
               border: 'none',
               borderRadius: '6px',
               background: isDirty ? 'var(--accent-primary)' : 'none',
-              color: isDirty ? '#fff' : 'var(--text-tertiary)',
+              color: isDirty ? 'var(--bg-primary)' : 'var(--text-tertiary)',
               cursor: isDirty ? 'pointer' : 'default',
               fontSize: '13px'
             }}
@@ -905,6 +1320,25 @@ export default function Editor(): JSX.Element {
           y={contextMenu.y}
           actions={contextMenu.items}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {showHistory && currentFile && (
+        <FileHistoryDialog
+          file={currentFile}
+          onClose={() => setShowHistory(false)}
+          onBeforeRestore={async () => {
+            if (!useFileStore.getState().isDirty) return
+            await saveFile()
+            const state = useFileStore.getState()
+            if (state.isDirty || state.hasConflict) {
+              throw new Error('当前文件尚未成功保存，已取消回滚。')
+            }
+          }}
+          onRestored={async () => {
+            await reloadCurrent()
+            forceEditorRemount()
+          }}
         />
       )}
     </div>

@@ -24,6 +24,12 @@ export interface MindmapEditorProps {
   value: string
   onChange: (data: string) => void
   className?: string
+  onReady?: (handle: MindmapEditorHandle | null) => void
+}
+
+export interface MindmapEditorHandle {
+  fit: () => void
+  exportPng: () => Promise<Blob | null>
 }
 
 let uidCounter = 0
@@ -99,7 +105,8 @@ function serializeData(data: MindElixirData): string {
 export function MindmapEditor({
   value,
   onChange,
-  className
+  className,
+  onReady
 }: MindmapEditorProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const instanceRef = useRef<MindElixirInstance | null>(null)
@@ -139,6 +146,35 @@ export function MindmapEditor({
     me.init(initialData)
     instanceRef.current = me
 
+    let isDisposed = false
+    let fitFrame = 0
+    let secondFitFrame = 0
+
+    const fit = (): void => {
+      if (isDisposed) return
+      try {
+        me.layout()
+        me.scaleFit()
+        me.toCenter()
+      } catch (err) {
+        console.warn('[Mindmap] fit failed:', err)
+      }
+    }
+
+    const scheduleFit = (): void => {
+      fitFrame = requestAnimationFrame(() => {
+        secondFitFrame = requestAnimationFrame(fit)
+      })
+    }
+
+    scheduleFit()
+    const fitTimer = window.setTimeout(fit, 250)
+
+    onReady?.({
+      fit,
+      exportPng: () => me.exportPng()
+    })
+
     // Persist every structural / textual change back to disk. Mind-Elixir
     // fires `operation` for user-driven edits (add, remove, edit topic,
     // move, etc.) but *not* for pure UI events like selection.
@@ -174,6 +210,11 @@ export function MindmapEditor({
 
     return () => {
       try {
+        isDisposed = true
+        if (fitFrame) cancelAnimationFrame(fitFrame)
+        if (secondFitFrame) cancelAnimationFrame(secondFitFrame)
+        window.clearTimeout(fitTimer)
+        onReady?.(null)
         me.bus.removeListener('operation', handleOperation)
         el.removeEventListener('mouseup', checkDirection)
         me.destroy()
@@ -182,7 +223,7 @@ export function MindmapEditor({
       }
       instanceRef.current = null
     }
-  }, [initialData])
+  }, [initialData, onReady])
 
   return (
     <div

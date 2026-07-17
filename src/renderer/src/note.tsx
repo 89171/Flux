@@ -14,12 +14,35 @@
 
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { useEffect, useState, useCallback, useRef, type CSSProperties } from 'react'
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useState,
+  useCallback,
+  useRef,
+  type CSSProperties
+} from 'react'
 import { Pin, X, Minus } from 'lucide-react'
 import MilkdownEditor from './components/MilkdownEditor'
+import CodeMirrorEditor from './components/CodeMirrorEditor'
 import type { NoteFormat } from '@shared/types'
 import './styles/global.css'
 import './styles/components.css'
+
+const DrawioEditor = lazy(() => import('./components/DrawioEditor'))
+const MindmapEditor = lazy(() => import('./components/MindmapEditor'))
+const WhiteboardEditor = lazy(() => import('./components/WhiteboardEditor'))
+const ExcalidrawEditor = lazy(() => import('./components/ExcalidrawEditor'))
+const KanbanEditor = lazy(() => import('./components/KanbanEditor'))
+const PlantUmlEditor = lazy(() => import('./components/PlantUmlEditor'))
+const MermaidEditor = lazy(() => import('./components/MermaidEditor'))
+const BpmnEditor = lazy(() => import('./components/BpmnEditor'))
+const DmnEditor = lazy(() => import('./components/DmnEditor'))
+
+type CSSPropertiesWithAppRegion = CSSProperties & {
+  WebkitAppRegion?: 'drag' | 'no-drag' | string
+}
 
 interface NoteData {
   noteId: string
@@ -49,14 +72,14 @@ const titlebarStyle: CSSProperties = {
   background: 'var(--bg-secondary)',
   userSelect: 'none',
   flexShrink: 0,
-} as CSSProperties
+} as CSSPropertiesWithAppRegion
 
 const titlebarActionsStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 2,
   WebkitAppRegion: 'no-drag',
-} as CSSProperties
+} as CSSPropertiesWithAppRegion
 
 const titlebarBtnStyle: CSSProperties = {
   width: 28,
@@ -72,6 +95,24 @@ const titlebarBtnStyle: CSSProperties = {
   borderRadius: 'var(--radius-sm)',
   transition: 'all var(--transition-fast)',
   padding: 0,
+  WebkitAppRegion: 'no-drag',
+} as CSSPropertiesWithAppRegion
+
+function NoteEditorFallback(): JSX.Element {
+  return (
+    <div
+      style={{
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: 'var(--text-tertiary)',
+        fontSize: 13
+      }}
+    >
+      Loading editor...
+    </div>
+  )
 }
 
 function NoteApp() {
@@ -162,6 +203,34 @@ function NoteApp() {
     [noteData]
   )
 
+  const saveNow = useCallback(async () => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    if (!noteData) return
+
+    setSaveStatus('saving')
+    try {
+      const result = await window.flux.file.writeGuarded(
+        noteData.notePath,
+        latestContentRef.current,
+        mtimeRef.current
+      )
+      if (result.ok) {
+        mtimeRef.current = result.mtime
+        isDirtyRef.current = false
+        setSaveStatus('saved')
+      } else {
+        console.warn('Manual save hit a write conflict; keeping local edits.')
+        setSaveStatus('unsaved')
+      }
+    } catch (err) {
+      console.error('Failed to save note:', err)
+      setSaveStatus('unsaved')
+    }
+  }, [noteData])
+
   // Cleanup save timer on unmount
   useEffect(() => {
     return () => {
@@ -221,8 +290,10 @@ function NoteApp() {
 
   // Minimize
   const handleMinimize = useCallback(() => {
-    window.flux.window.minimizeFrame()
-  }, [])
+    if (noteData) {
+      void window.flux.window.minimize(noteData.noteId)
+    }
+  }, [noteData])
 
   const isMarkdown = noteData?.format === 'markdown'
 
@@ -232,25 +303,7 @@ function NoteApp() {
       if (e.isComposing || e.keyCode === 229) return
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault()
-        if (saveTimerRef.current) {
-          clearTimeout(saveTimerRef.current)
-        }
-        if (noteData) {
-          setSaveStatus('saving')
-          window.flux.file
-            .writeGuarded(noteData.notePath, latestContentRef.current, mtimeRef.current)
-            .then((result) => {
-              if (result.ok) {
-                mtimeRef.current = result.mtime
-                isDirtyRef.current = false
-                setSaveStatus('saved')
-              } else {
-                console.warn('Manual save hit a write conflict; keeping local edits.')
-                setSaveStatus('unsaved')
-              }
-            })
-            .catch(() => setSaveStatus('unsaved'))
-        }
+        void saveNow()
       }
       if ((e.metaKey || e.ctrlKey) && (e.key === '=' || e.key === '+')) {
         e.preventDefault()
@@ -267,7 +320,7 @@ function NoteApp() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [noteData])
+  }, [noteData, saveNow])
 
   if (isLoading) {
     return (
@@ -310,6 +363,113 @@ function NoteApp() {
         ? 'Saving...'
         : 'Unsaved'
 
+  const renderEditor = (): JSX.Element => {
+    switch (noteData.format) {
+      case 'markdown':
+        return (
+          <MilkdownEditor
+            key={noteData.notePath}
+            value={content}
+            onChange={handleContentChange}
+            className="milkdown-editor-wrapper"
+          />
+        )
+      case 'drawio':
+        return (
+          <DrawioEditor
+            key={noteData.notePath}
+            value={content}
+            onChange={handleContentChange}
+            onRequestSave={() => { void saveNow() }}
+            className="drawio-editor-wrapper"
+          />
+        )
+      case 'mindmap':
+        return (
+          <MindmapEditor
+            key={noteData.notePath}
+            value={content}
+            onChange={handleContentChange}
+            className="mindmap-editor-wrapper"
+          />
+        )
+      case 'whiteboard':
+        return (
+          <WhiteboardEditor
+            key={noteData.notePath}
+            value={content}
+            onChange={handleContentChange}
+            className="whiteboard-editor-wrapper"
+          />
+        )
+      case 'excalidraw':
+        return (
+          <ExcalidrawEditor
+            key={noteData.notePath}
+            value={content}
+            onChange={handleContentChange}
+            className="excalidraw-editor-wrapper"
+          />
+        )
+      case 'kanban':
+        return (
+          <KanbanEditor
+            key={noteData.notePath}
+            value={content}
+            onChange={handleContentChange}
+            className="kanban-editor-wrapper"
+          />
+        )
+      case 'plantuml':
+        return (
+          <PlantUmlEditor
+            key={noteData.notePath}
+            value={content}
+            onChange={handleContentChange}
+            className="plantuml-editor-wrapper"
+          />
+        )
+      case 'mermaid':
+        return (
+          <MermaidEditor
+            key={noteData.notePath}
+            value={content}
+            onChange={handleContentChange}
+            className="mermaid-editor-wrapper"
+            fileName={noteData.noteName}
+          />
+        )
+      case 'bpmn':
+        return (
+          <BpmnEditor
+            key={noteData.notePath}
+            value={content}
+            onChange={handleContentChange}
+            className="bpmn-editor-wrapper"
+          />
+        )
+      case 'dmn':
+        return (
+          <DmnEditor
+            key={noteData.notePath}
+            value={content}
+            onChange={handleContentChange}
+            className="dmn-editor-wrapper"
+          />
+        )
+      default:
+        return (
+          <CodeMirrorEditor
+            key={noteData.notePath}
+            value={content}
+            onChange={handleContentChange}
+            fileName={noteData.noteName}
+            fontSize={fontSize}
+          />
+        )
+    }
+  }
+
   return (
     <div className={`note-window ${isPinned ? 'pinned' : ''}`}>
       {/* Title Bar */}
@@ -341,6 +501,7 @@ function NoteApp() {
           <button
             style={titlebarBtnStyle}
             onClick={handlePinToggle}
+            onMouseDown={(e) => e.stopPropagation()}
             title={isPinned ? 'Unpin' : 'Pin to Top'}
             type="button"
             onMouseEnter={(e) => {
@@ -364,6 +525,7 @@ function NoteApp() {
           <button
             style={titlebarBtnStyle}
             onClick={handleMinimize}
+            onMouseDown={(e) => e.stopPropagation()}
             title="Minimize"
             type="button"
             onMouseEnter={(e) => {
@@ -380,6 +542,7 @@ function NoteApp() {
           <button
             style={titlebarBtnStyle}
             onClick={handleClose}
+            onMouseDown={(e) => e.stopPropagation()}
             title="Close"
             type="button"
             onMouseEnter={(e) => {
@@ -397,35 +560,17 @@ function NoteApp() {
       </div>
 
       {/* Content */}
-      <div className="note-content" style={{ fontSize: `${fontSize}px` }}>
-        {isMarkdown ? (
-          <MilkdownEditor
-            value={content}
-            onChange={handleContentChange}
-            className="milkdown-editor-wrapper"
-          />
-        ) : (
-          <textarea
-            value={content}
-            onChange={(e) => handleContentChange(e.target.value)}
-            spellCheck={false}
-            style={{
-              width: '100%',
-              height: '100%',
-              border: 'none',
-              outline: 'none',
-              resize: 'none',
-              padding: '16px 20px',
-              fontFamily: 'var(--font-mono)',
-              fontSize: 'inherit',
-              lineHeight: 1.7,
-              color: 'var(--text-primary)',
-              backgroundColor: 'transparent',
-              boxSizing: 'border-box',
-            }}
-            placeholder="Start typing..."
-          />
-        )}
+      <div
+        className="note-content"
+        style={{
+          fontSize: `${fontSize}px`,
+          padding: isMarkdown ? '16px 20px' : 0,
+          overflow: isMarkdown ? 'auto' : 'hidden'
+        }}
+      >
+        <Suspense fallback={<NoteEditorFallback />}>
+          {renderEditor()}
+        </Suspense>
       </div>
     </div>
   )

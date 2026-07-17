@@ -198,7 +198,8 @@ const columnStyle: CSSProperties = {
   borderRadius: 8,
   padding: 10,
   gap: 8,
-  maxHeight: '100%'
+  height: '100%',
+  minHeight: 0
 }
 
 const cardStyle: CSSProperties = {
@@ -562,10 +563,12 @@ export function KanbanEditor({
       style={{
         width: '100%',
         height: '100%',
-        overflow: 'auto',
+        overflow: 'hidden',
         padding: 16,
         background: 'var(--bg-primary)',
-        boxSizing: 'border-box'
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column'
       }}
     >
       {/* Search + archive toggle */}
@@ -638,7 +641,17 @@ export function KanbanEditor({
         )}
       </div>
 
-      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', minHeight: '100%' }}>
+      <div
+        style={{
+          display: 'flex',
+          gap: 12,
+          alignItems: 'stretch',
+          flex: 1,
+          minHeight: 0,
+          overflowX: 'auto',
+          overflowY: 'hidden'
+        }}
+      >
         {doc.columns.map((column) => {
           const cards = cardsByColumn.get(column.id) ?? []
           const isDragTarget = dragOverColumn === column.id
@@ -712,6 +725,15 @@ export function KanbanEditor({
                     </span>
                   </span>
                 )}
+                {!showArchived && (
+                  <button
+                    onClick={() => openAddModal(column.id)}
+                    title="添加任务"
+                    style={iconBtnStyle}
+                  >
+                    <Plus size={13} />
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setEditingColumn(column.id)
@@ -734,7 +756,17 @@ export function KanbanEditor({
               </div>
 
               {/* Cards */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minHeight: 40 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: 'auto',
+                  paddingRight: 2
+                }}
+              >
                 {cards.map((card) => (
                   <div
                     key={card.id}
@@ -782,27 +814,6 @@ export function KanbanEditor({
                   </div>
                 ))}
               </div>
-
-              {/* Add card */}
-              {!showArchived && (
-                <button
-                  onClick={() => openAddModal(column.id)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    padding: '6px 8px',
-                    background: 'transparent',
-                    border: '1px dashed var(--border-color)',
-                    borderRadius: 4,
-                    color: 'var(--text-tertiary)',
-                    cursor: 'pointer',
-                    fontSize: 12
-                  }}
-                >
-                  <Plus size={13} /> 添加任务
-                </button>
-              )}
             </div>
           )
         })}
