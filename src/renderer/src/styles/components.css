@@ -147,6 +147,11 @@
   color: var(--text-primary);
 }
 
+.sidebar-action-btn.active {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
 .sidebar-action-btn:active {
   background: var(--bg-active);
 }
@@ -269,6 +274,107 @@
 }
 .tree-node .tree-label { overflow: hidden; text-overflow: ellipsis; }
 .tree-children { overflow: hidden; }
+
+/* ============ Trash ============ */
+.trash-panel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.trash-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trash-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 58px;
+  margin: 0 4px;
+  padding: 6px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+}
+
+.trash-item:hover {
+  background: var(--bg-hover);
+}
+
+.trash-item-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+}
+
+.trash-item-main {
+  min-width: 0;
+}
+
+.trash-item-name,
+.trash-item-path,
+.trash-item-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trash-item-name {
+  font-size: var(--font-size-base);
+  font-weight: 500;
+}
+
+.trash-item-path {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.trash-item-meta {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.trash-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.trash-item-action {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.trash-item-action:hover {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.trash-item-action.danger:hover {
+  color: #cc0000;
+}
+
+.trash-empty {
+  min-height: 180px;
+}
 
 /* ============ Context Menu ============ */
 .context-menu {

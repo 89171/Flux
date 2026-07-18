@@ -14,6 +14,9 @@ import type {
   FileHistoryEntry,
   FileHistoryReadResult,
   SearchResult,
+  StorageSettings,
+  TrashEntry,
+  TrashRestoreResult,
   UpdateCheckResult
 } from '../shared/types'
 
@@ -54,6 +57,14 @@ const api = {
         ipcRenderer.invoke(IPC.FILE_HISTORY_READ, path, id),
       restore: (path: string, id: string): Promise<FileReadMetaResult> =>
         ipcRenderer.invoke(IPC.FILE_HISTORY_RESTORE, path, id)
+    },
+    trash: {
+      list: (): Promise<TrashEntry[]> => ipcRenderer.invoke(IPC.FILE_TRASH_LIST),
+      restore: (id: string): Promise<TrashRestoreResult> =>
+        ipcRenderer.invoke(IPC.FILE_TRASH_RESTORE, id),
+      delete: (id: string): Promise<boolean> => ipcRenderer.invoke(IPC.FILE_TRASH_DELETE, id),
+      empty: (): Promise<boolean> => ipcRenderer.invoke(IPC.FILE_TRASH_EMPTY),
+      open: (): Promise<boolean> => ipcRenderer.invoke(IPC.FILE_TRASH_OPEN)
     },
     search: (query: string, maxResults?: number): Promise<SearchResult[]> =>
       ipcRenderer.invoke(IPC.FILE_SEARCH, query, maxResults),
@@ -160,6 +171,12 @@ const api = {
   settings: {
     get: (): Promise<AppSettings> => ipcRenderer.invoke(IPC.SETTINGS_GET),
     set: (partial: Partial<AppSettings>): Promise<AppSettings> => ipcRenderer.invoke(IPC.SETTINGS_SET, partial)
+  },
+  storage: {
+    testConfig: (
+      storage: StorageSettings
+    ): Promise<{ success: boolean; provider: string; error?: string }> =>
+      ipcRenderer.invoke(IPC.STORAGE_TEST_CONFIG, storage)
   },
   dialog: {
     openFile: (opts?: { title?: string; filters?: Array<{ name: string; extensions: string[] }> }): Promise<string | null> => ipcRenderer.invoke(IPC.DIALOG_OPEN_FILE, opts),

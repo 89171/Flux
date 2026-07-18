@@ -153,7 +153,8 @@ export function MindmapEditor({
     const fit = (): void => {
       if (isDisposed) return
       try {
-        me.layout()
+        // `layout()` rebuilds node DOM; `refresh()` also redraws link SVGs.
+        me.refresh()
         me.scaleFit()
         me.toCenter()
       } catch (err) {

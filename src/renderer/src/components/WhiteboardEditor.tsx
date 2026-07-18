@@ -15,8 +15,8 @@
  *  - License key is read from a build-time global
  *    (`window.FLUX_TLDRAW_LICENSE_KEY`, injected from the
  *    `FLUX_TLDRAW_LICENSE_KEY` env var in electron.vite.config.ts)
- *    instead of being hardcoded in source. This keeps the secret out
- *    of the repo and lets CI rotate keys without code changes.
+ *    or the bundled fallback key. This lets CI rotate keys without
+ *    touching renderer code.
  *  - `store.listen` is debounced (400ms) before serialising. Without
  *    this, every brush stroke on a large canvas triggered a full
  *    `getSnapshot(store)` + `JSON.stringify` on the main thread.
@@ -41,9 +41,9 @@ import 'tldraw/tldraw.css'
 
 /**
  * tldraw commercial licence key, injected at build time from the
- * `FLUX_TLDRAW_LICENSE_KEY` environment variable (see
- * electron.vite.config.ts). Empty string means "no key configured"
- * — tldraw will run in its free/trial mode.
+ * `FLUX_TLDRAW_LICENSE_KEY` environment variable or the configured
+ * fallback key in electron.vite.config.ts. Empty string means "no key
+ * configured" — tldraw will run in its free/trial mode.
  */
 const TLDRAW_LICENSE_KEY: string =
   (globalThis as { FLUX_TLDRAW_LICENSE_KEY?: string }).FLUX_TLDRAW_LICENSE_KEY ?? ''

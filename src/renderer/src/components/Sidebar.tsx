@@ -58,9 +58,10 @@ import {
   LayoutGrid,
   Waypoints,
   PanelLeftClose,
-  History as HistoryIcon
+  History as HistoryIcon,
+  RotateCcw
 } from 'lucide-react'
-import type { NoteFile, NoteFormat } from '@shared/types'
+import type { NoteFile, NoteFormat, TrashEntry } from '@shared/types'
 import { useFileStore } from '../stores/fileStore'
 import { usePluginStore } from '../stores/pluginStore'
 import FileHistoryDialog from './FileHistoryDialog'
@@ -170,6 +171,21 @@ function PluginIconRenderer({ icon, size = 16 }: { icon?: string; size?: number 
 function getExtension(name: string): string {
   const dot = name.lastIndexOf('.')
   return dot >= 0 ? name.substring(dot + 1).toLowerCase() : ''
+}
+
+function formatFileSize(size: number): string {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function formatDeletedAt(timestamp: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(new Date(timestamp))
 }
 
 const inlineInputStyle: CSSProperties = {
@@ -429,12 +445,91 @@ function TreeNode({
   )
 }
 
+interface TrashPanelProps {
+  entries: TrashEntry[]
+  extensionIconMap: Map<string, string>
+  onRestore: (entry: TrashEntry) => void
+  onPermanentDelete: (entry: TrashEntry) => void
+}
+
+function TrashPanel({
+  entries,
+  extensionIconMap,
+  onRestore,
+  onPermanentDelete
+}: TrashPanelProps) {
+  if (entries.length === 0) {
+    return (
+      <div className="trash-panel">
+        <div className="empty-state trash-empty">
+          <Trash2 size={30} style={{ color: 'var(--text-disabled)' }} />
+          <div>Trash is empty</div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="trash-panel">
+      <div className="trash-list">
+        {entries.map((entry) => {
+          const extension = getExtension(entry.name)
+          return (
+            <div className="trash-item" key={entry.id}>
+              <span className="trash-item-icon">
+                {entry.type === 'directory' ? (
+                  <Folder size={16} />
+                ) : extensionIconMap.has(extension) ? (
+                  <PluginIconRenderer icon={extensionIconMap.get(extension)} size={16} />
+                ) : (
+                  <BuiltinFormatIcon format={entry.format || 'plaintext'} size={16} />
+                )}
+              </span>
+              <div className="trash-item-main">
+                <div className="trash-item-name">{entry.name}</div>
+                <div className="trash-item-path">{entry.originalPath}</div>
+                <div className="trash-item-meta">
+                  {formatDeletedAt(entry.deletedAt)} · {formatFileSize(entry.size)}
+                </div>
+              </div>
+              <div className="trash-item-actions">
+                <button
+                  className="trash-item-action tooltip"
+                  data-tooltip="Restore"
+                  onClick={() => onRestore(entry)}
+                  type="button"
+                >
+                  <RotateCcw size={14} />
+                </button>
+                <button
+                  className="trash-item-action danger tooltip"
+                  data-tooltip="Delete Forever"
+                  onClick={() => onPermanentDelete(entry)}
+                  type="button"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const tree = useFileStore((s) => s.tree)
+  const trash = useFileStore((s) => s.trash)
   const currentFile = useFileStore((s) => s.currentFile)
   const openFile = useFileStore((s) => s.openFile)
   const createFile = useFileStore((s) => s.createFile)
   const deleteFile = useFileStore((s) => s.deleteFile)
+  const loadTrash = useFileStore((s) => s.loadTrash)
+  const restoreTrashEntry = useFileStore((s) => s.restoreTrashEntry)
+  const permanentlyDeleteTrashEntry = useFileStore((s) => s.permanentlyDeleteTrashEntry)
+  const emptyTrash = useFileStore((s) => s.emptyTrash)
+  const openTrashFolder = useFileStore((s) => s.openTrashFolder)
   const renameFile = useFileStore((s) => s.renameFile)
   const moveFile = useFileStore((s) => s.moveFile)
   const loadTree = useFileStore((s) => s.loadTree)
@@ -448,6 +543,7 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const [renamingPath, setRenamingPath] = useState<string | null>(null)
   const [creating, setCreating] = useState<CreatingState | null>(null)
   const [dragOverPath, setDragOverPath] = useState<string | null>(null)
+  const [showTrash, setShowTrash] = useState(false)
   const draggingPathRef = useRef<string | null>(null)
   const [showNewFileMenu, setShowNewFileMenu] = useState(false)
   const [historyFile, setHistoryFile] = useState<NoteFile | null>(null)
@@ -502,6 +598,66 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
     }
     return map
   }, [plugins])
+
+  useEffect(() => {
+    void loadTrash()
+  }, [loadTrash])
+
+  const handleToggleTrash = useCallback(() => {
+    setShowTrash((prev) => {
+      const next = !prev
+      if (next) {
+        setContextMenu(null)
+        setContextNewFileSubmenuOpen(false)
+        setCreating(null)
+        void loadTrash()
+      }
+      return next
+    })
+  }, [loadTrash])
+
+  const handleRefresh = useCallback(() => {
+    if (showTrash) {
+      void loadTrash()
+      return
+    }
+    void loadTree()
+  }, [showTrash, loadTrash, loadTree])
+
+  const handleRestoreTrashEntry = useCallback(
+    async (entry: TrashEntry) => {
+      try {
+        await restoreTrashEntry(entry.id)
+      } catch (err) {
+        console.error('Failed to restore trash item:', err)
+      }
+    },
+    [restoreTrashEntry]
+  )
+
+  const handlePermanentDeleteTrashEntry = useCallback(
+    async (entry: TrashEntry) => {
+      const confirmed = window.confirm(`Permanently delete "${entry.name}"? This cannot be undone.`)
+      if (!confirmed) return
+      try {
+        await permanentlyDeleteTrashEntry(entry.id)
+      } catch (err) {
+        console.error('Failed to permanently delete trash item:', err)
+      }
+    },
+    [permanentlyDeleteTrashEntry]
+  )
+
+  const handleEmptyTrash = useCallback(async () => {
+    if (trash.length === 0) return
+    const confirmed = window.confirm('Permanently delete all items in Trash? This cannot be undone.')
+    if (!confirmed) return
+    try {
+      await emptyTrash()
+    } catch (err) {
+      console.error('Failed to empty trash:', err)
+    }
+  }, [trash.length, emptyTrash])
 
   // Close the New File dropdown on outside click. Clicks inside any
   // anchor-tagged button (there are two — toolbar + empty state) or
@@ -835,71 +991,105 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
     <div className="sidebar">
       {/* Header */}
       <div className="sidebar-header">
-        <span className="sidebar-header-title">Explorer</span>
+        <span className="sidebar-header-title">{showTrash ? 'Trash' : 'Explorer'}</span>
         <div className="sidebar-actions">
-          <div style={{ position: 'relative' }}>
-            <button
-              className="sidebar-action-btn tooltip"
-              data-tooltip="New File"
-              data-new-file-anchor="toolbar"
-              onClick={handleNewFile}
-              type="button"
-            >
-              <FilePlus size={16} strokeWidth={1.8} />
-            </button>
-            {showNewFileMenu && (
-              <div
-                className="new-file-dropdown"
-                style={{ top: dropdownPos.top, left: dropdownPos.left }}
-              >
-                <div className="new-file-dropdown-header">
-                  <FileType size={13} />
-                  <span>New File Type</span>
-                </div>
-                {fileTypes.map((ft) => (
-                  <button
-                    key={`${ft.format}-${ft.extension}`}
-                    className="new-file-dropdown-item"
-                    onClick={() => handleNewFileWithType(ft)}
-                    type="button"
+          {!showTrash && (
+            <>
+              <div style={{ position: 'relative' }}>
+                <button
+                  className="sidebar-action-btn tooltip"
+                  data-tooltip="New File"
+                  data-new-file-anchor="toolbar"
+                  onClick={handleNewFile}
+                  type="button"
+                >
+                  <FilePlus size={16} strokeWidth={1.8} />
+                </button>
+                {showNewFileMenu && (
+                  <div
+                    className="new-file-dropdown"
+                    style={{ top: dropdownPos.top, left: dropdownPos.left }}
                   >
-                    <span className="new-file-dropdown-icon">
-                      {ft.icon ? (
-                        <PluginIconRenderer icon={ft.icon} size={16} />
-                      ) : (
-                        <BuiltinFormatIcon format={ft.format} size={16} />
-                      )}
-                    </span>
-                    <span className="new-file-dropdown-label">{ft.label}</span>
-                    <span className="new-file-dropdown-ext">.{ft.extension}</span>
-                  </button>
-                ))}
+                    <div className="new-file-dropdown-header">
+                      <FileType size={13} />
+                      <span>New File Type</span>
+                    </div>
+                    {fileTypes.map((ft) => (
+                      <button
+                        key={`${ft.format}-${ft.extension}`}
+                        className="new-file-dropdown-item"
+                        onClick={() => handleNewFileWithType(ft)}
+                        type="button"
+                      >
+                        <span className="new-file-dropdown-icon">
+                          {ft.icon ? (
+                            <PluginIconRenderer icon={ft.icon} size={16} />
+                          ) : (
+                            <BuiltinFormatIcon format={ft.format} size={16} />
+                          )}
+                        </span>
+                        <span className="new-file-dropdown-label">{ft.label}</span>
+                        <span className="new-file-dropdown-ext">.{ft.extension}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          <button
-            className="sidebar-action-btn tooltip"
-            data-tooltip="New Folder"
-            onClick={handleNewDirectory}
-            type="button"
-          >
-            <FolderPlus size={16} strokeWidth={1.8} />
-          </button>
-          <button
-            className="sidebar-action-btn tooltip"
-            data-tooltip="Open Folder"
-            onClick={() => openFolder()}
-            type="button"
-          >
-            <FolderOpenIcon size={16} strokeWidth={1.8} />
-          </button>
+              <button
+                className="sidebar-action-btn tooltip"
+                data-tooltip="New Folder"
+                onClick={handleNewDirectory}
+                type="button"
+              >
+                <FolderPlus size={16} strokeWidth={1.8} />
+              </button>
+              <button
+                className="sidebar-action-btn tooltip"
+                data-tooltip="Open Folder"
+                onClick={() => openFolder()}
+                type="button"
+              >
+                <FolderOpenIcon size={16} strokeWidth={1.8} />
+              </button>
+            </>
+          )}
+          {showTrash && (
+            <>
+              <button
+                className="sidebar-action-btn tooltip"
+                data-tooltip="Open Trash Folder"
+                onClick={() => openTrashFolder()}
+                type="button"
+              >
+                <FolderOpenIcon size={16} strokeWidth={1.8} />
+              </button>
+              {trash.length > 0 && (
+                <button
+                  className="sidebar-action-btn tooltip"
+                  data-tooltip="Empty Trash"
+                  onClick={handleEmptyTrash}
+                  type="button"
+                >
+                  <Trash2 size={15} strokeWidth={1.8} />
+                </button>
+              )}
+            </>
+          )}
           <button
             className="sidebar-action-btn tooltip"
             data-tooltip="Refresh"
-            onClick={loadTree}
+            onClick={handleRefresh}
             type="button"
           >
             <RefreshCw size={15} strokeWidth={1.8} />
+          </button>
+          <button
+            className={`sidebar-action-btn tooltip${showTrash ? ' active' : ''}`}
+            data-tooltip={showTrash ? 'Back to Explorer' : 'Trash'}
+            onClick={handleToggleTrash}
+            type="button"
+          >
+            <Trash2 size={15} strokeWidth={1.8} />
           </button>
           <button
             className="sidebar-action-btn tooltip"
@@ -912,17 +1102,24 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
         </div>
       </div>
 
-      {/* Tree */}
-      <div
-        className="sidebar-tree"
-        onContextMenu={(e) => {
-          // Right-click on empty area → create at root level
-          if (e.target === e.currentTarget) {
-            e.preventDefault()
-            setContextMenu({ x: e.clientX, y: e.clientY, node: { type: 'directory', path: '', name: '', id: '__root__', createdAt: 0, updatedAt: 0 } })
-          }
-        }}
-      >
+      {showTrash ? (
+        <TrashPanel
+          entries={trash}
+          extensionIconMap={extensionIconMap}
+          onRestore={handleRestoreTrashEntry}
+          onPermanentDelete={handlePermanentDeleteTrashEntry}
+        />
+      ) : (
+        <div
+          className="sidebar-tree"
+          onContextMenu={(e) => {
+            // Right-click on empty area → create at root level
+            if (e.target === e.currentTarget) {
+              e.preventDefault()
+              setContextMenu({ x: e.clientX, y: e.clientY, node: { type: 'directory', path: '', name: '', id: '__root__', createdAt: 0, updatedAt: 0 } })
+            }
+          }}
+        >
         {/* Creating input — shown in both empty and non-empty states */}
         {creating && creating.parentPath === '' && (
           <div
@@ -1026,10 +1223,11 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
             ))}
           </>
         )}
-      </div>
+        </div>
+      )}
 
       {/* Context menu */}
-      {contextMenu && (
+      {!showTrash && contextMenu && (
         <div
           className="context-menu"
           style={{ left: contextMenu.x, top: contextMenu.y }}
@@ -1147,7 +1345,7 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
                 className="context-menu-item danger"
                 onClick={() => handleContextDelete(contextMenu.node)}
               >
-                <Trash2 size={14} /> Delete
+                <Trash2 size={14} /> Move to Trash
               </div>
             </>
           )}

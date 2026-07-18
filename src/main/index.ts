@@ -8,12 +8,14 @@ import { AIService } from './AIService'
 import { registerIPC } from './ipc'
 import { getSettings, isPluginEnabled } from './SettingsStore'
 import { IPC } from '@shared/ipc-channels'
+import { StorageManager } from './storage'
 
 let windowManager: WindowManager
 let pluginManager: PluginManager
 let pluginInstaller: PluginInstaller
 let fsManager: FileSystemManager
 let aiService: AIService
+let storageManager: StorageManager
 
 let pendingOpenFile: string | null = null
 
@@ -45,8 +47,11 @@ async function bootstrap(): Promise<void> {
   // Configure AI with saved settings
   aiService.configure(settings.ai)
 
+  // StorageManager owns the provider boundary used by future sync flows.
+  storageManager = new StorageManager(settings.storage)
+
   // Register all IPC handlers
-  registerIPC(windowManager, pluginManager, pluginInstaller, fsManager, aiService)
+  registerIPC(windowManager, pluginManager, pluginInstaller, fsManager, aiService, storageManager)
 
   // Discover plugins from builtin and user directories
   console.log('[Bootstrap] Discovering plugins...')

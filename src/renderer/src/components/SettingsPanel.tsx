@@ -1,8 +1,9 @@
 /**
  * Flux Settings Panel
  *
- * Modal settings dialog with three sections:
+ * Modal settings dialog with four sections:
  *  - Appearance: Light/Dark theme toggle
+ *  - Storage: provider selection and sync storage credentials
  *  - AI Configuration: provider, API key, model, base URL
  *  - About: app version
  *
@@ -22,6 +23,7 @@ interface SettingsPanelProps {
 }
 
 type AIProvider = AppSettings['ai']['provider']
+type StorageProvider = AppSettings['storage']['provider']
 type Theme = 'light' | 'dark'
 
 const PROVIDERS: { value: AIProvider; label: string }[] = [
@@ -33,6 +35,14 @@ const PROVIDERS: { value: AIProvider; label: string }[] = [
   { value: 'glm', label: 'Zhipu GLM' },
   { value: 'anthropic', label: 'Anthropic Claude' },
   { value: 'local', label: 'Local (Ollama/LM Studio)' }
+]
+
+const STORAGE_PROVIDERS: { value: StorageProvider; label: string }[] = [
+  { value: 'local', label: 'Local Folder' },
+  { value: 'github', label: 'GitHub Repository' },
+  { value: 'webdav', label: 'WebDAV' },
+  { value: 'ftp', label: 'FTP' },
+  { value: 's3', label: 'S3 Compatible' }
 ]
 
 /**
@@ -116,6 +126,45 @@ const PROVIDER_GUIDE: ProviderGuideEntry[] = [
   }
 ]
 
+interface StorageGuideEntry {
+  name: string
+  fields: string[]
+  notes: string
+}
+
+const STORAGE_GUIDE: StorageGuideEntry[] = [
+  {
+    name: 'Local Folder',
+    fields: ['Root Path'],
+    notes:
+      'Uses a folder on this computer as a StorageProvider. This is the default provider and is useful for local-only sync tests.'
+  },
+  {
+    name: 'GitHub Repository',
+    fields: ['Owner', 'Repository', 'Branch', 'Base Path', 'Token'],
+    notes:
+      'Create a fine-grained token with Contents read/write access for one repository. Base Path is optional and keeps Flux files inside a subdirectory such as flux-notes.'
+  },
+  {
+    name: 'WebDAV',
+    fields: ['Endpoint', 'Username', 'Password', 'Base Path'],
+    notes:
+      'Works with servers that support standard PROPFIND, GET, PUT, DELETE, and MOVE. Use the full collection URL as Endpoint.'
+  },
+  {
+    name: 'FTP',
+    fields: ['Host', 'Port', 'Username', 'Password', 'Secure', 'Base Path'],
+    notes:
+      'Supports FTP and explicit FTPS through the Secure toggle. Base Path scopes all Flux sync files under one remote directory.'
+  },
+  {
+    name: 'S3 Compatible',
+    fields: ['Endpoint', 'Region', 'Bucket', 'Access Key ID', 'Secret Access Key', 'Base Path'],
+    notes:
+      'Supports AWS S3 and compatible object stores such as MinIO, Cloudflare R2, and Backblaze B2. Force Path Style is useful for MinIO and many self-hosted endpoints.'
+  }
+]
+
 function SettingsPanel({ onClose, onThemeChange }: SettingsPanelProps) {
   const [loaded, setLoaded] = useState(false)
   const [aiProvider, setAiProvider] = useState<AIProvider>('none')
@@ -124,6 +173,7 @@ function SettingsPanel({ onClose, onThemeChange }: SettingsPanelProps) {
   const [apiKey, setApiKey] = useState('')
   const [model, setModel] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
+  const [storageSettings, setStorageSettings] = useState<AppSettings['storage'] | null>(null)
   const [theme, setTheme] = useState<Theme>('light')
   const [version, setVersion] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -132,7 +182,10 @@ function SettingsPanel({ onClose, onThemeChange }: SettingsPanelProps) {
   // 'error' = terminal feedback shown inline below the Save button.
   const [saveStatus, setSaveStatus] = useState<'idle' | 'testing' | 'saving' | 'success' | 'error'>('idle')
   const [saveMessage, setSaveMessage] = useState('')
+  const [storageStatus, setStorageStatus] = useState<'idle' | 'testing' | 'saving' | 'success' | 'error'>('idle')
+  const [storageMessage, setStorageMessage] = useState('')
   const [showGuide, setShowGuide] = useState(false)
+  const [showStorageGuide, setShowStorageGuide] = useState(false)
   const [copiedField, setCopiedField] = useState<string | null>(null)
 
   // Load current settings + app version on mount
@@ -147,6 +200,7 @@ function SettingsPanel({ onClose, onThemeChange }: SettingsPanelProps) {
         setApiKey(s.ai.apiKey)
         setModel(s.ai.model)
         setBaseUrl(s.ai.baseUrl)
+        setStorageSettings(s.storage)
         setTheme(s.theme)
         setLoaded(true)
       } catch (err) {
@@ -274,6 +328,67 @@ function SettingsPanel({ onClose, onThemeChange }: SettingsPanelProps) {
       )
     }
   }, [aiProvider, apiKey, model, baseUrl])
+
+  const updateStorage = useCallback((partial: Partial<AppSettings['storage']>) => {
+    setStorageSettings((prev) => (prev ? { ...prev, ...partial } : prev))
+  }, [])
+
+  const updateStorageConfig = useCallback(
+    <K extends StorageProvider>(
+      provider: K,
+      partial: Partial<AppSettings['storage'][K]>
+    ) => {
+      setStorageSettings((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          [provider]: {
+            ...prev[provider],
+            ...partial
+          }
+        }
+      })
+    },
+    []
+  )
+
+  const handleTestStorage = useCallback(async () => {
+    if (!storageSettings) return
+    setError(null)
+    setStorageStatus('testing')
+    setStorageMessage('')
+    try {
+      const result = await window.flux.storage.testConfig(storageSettings)
+      if (result.success) {
+        setStorageStatus('success')
+        setStorageMessage(`Connected to ${result.provider}.`)
+      } else {
+        setStorageStatus('error')
+        setStorageMessage(result.error || 'Storage test failed')
+      }
+    } catch (err) {
+      console.error('Failed to test storage settings:', err)
+      setStorageStatus('error')
+      setStorageMessage(err instanceof Error ? err.message : 'Storage test failed')
+    }
+  }, [storageSettings])
+
+  const handleSaveStorage = useCallback(async () => {
+    if (!storageSettings) return
+    setError(null)
+    setStorageStatus('saving')
+    setStorageMessage('')
+    try {
+      const updated = await window.flux.settings.set({ storage: storageSettings })
+      setStorageSettings(updated.storage)
+      setStorageStatus('success')
+      setStorageMessage('Storage settings saved.')
+    } catch (err) {
+      console.error('Failed to save storage settings:', err)
+      setStorageStatus('error')
+      setStorageMessage(err instanceof Error ? err.message : 'Failed to save storage settings')
+    }
+  }, [storageSettings])
 
   // Copy a value to the clipboard with brief "copied" feedback so the
   // user knows the click landed.
@@ -455,6 +570,462 @@ function SettingsPanel({ onClose, onThemeChange }: SettingsPanelProps) {
                 <Moon size={14} /> Dark
               </button>
             </div>
+          </div>
+
+          {/* Storage */}
+          <div style={sectionStyle}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 12
+              }}
+            >
+              <h3 style={{ ...headingStyle, marginBottom: 0 }}>Storage</h3>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setShowStorageGuide(true)}
+                style={{ gap: 6, padding: '4px 10px', fontSize: 'var(--font-size-sm)' }}
+                title="Show how to configure storage providers"
+              >
+                <BookOpen size={13} /> Configuration Guide
+              </button>
+            </div>
+
+            <div style={rowStyle}>
+              <label style={labelStyle} htmlFor="settings-storage-provider">
+                Provider
+              </label>
+              <select
+                id="settings-storage-provider"
+                style={inputStyle}
+                value={storageSettings?.provider ?? 'local'}
+                onChange={(e) => updateStorage({ provider: e.target.value as StorageProvider })}
+                disabled={!loaded || !storageSettings}
+              >
+                {STORAGE_PROVIDERS.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {storageSettings?.provider === 'local' && (
+              <div style={rowStyle}>
+                <label style={labelStyle} htmlFor="settings-storage-local-root">
+                  Root Path
+                </label>
+                <input
+                  id="settings-storage-local-root"
+                  type="text"
+                  style={inputStyle}
+                  value={storageSettings.local.rootPath}
+                  onChange={(e) => updateStorageConfig('local', { rootPath: e.target.value })}
+                  disabled={!loaded}
+                  autoComplete="off"
+                />
+              </div>
+            )}
+
+            {storageSettings?.provider === 'github' && (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div style={rowStyle}>
+                    <label style={labelStyle} htmlFor="settings-storage-github-owner">
+                      Owner
+                    </label>
+                    <input
+                      id="settings-storage-github-owner"
+                      type="text"
+                      style={inputStyle}
+                      value={storageSettings.github.owner}
+                      onChange={(e) => updateStorageConfig('github', { owner: e.target.value })}
+                      disabled={!loaded}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div style={rowStyle}>
+                    <label style={labelStyle} htmlFor="settings-storage-github-repo">
+                      Repository
+                    </label>
+                    <input
+                      id="settings-storage-github-repo"
+                      type="text"
+                      style={inputStyle}
+                      value={storageSettings.github.repo}
+                      onChange={(e) => updateStorageConfig('github', { repo: e.target.value })}
+                      disabled={!loaded}
+                      autoComplete="off"
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div style={rowStyle}>
+                    <label style={labelStyle} htmlFor="settings-storage-github-branch">
+                      Branch
+                    </label>
+                    <input
+                      id="settings-storage-github-branch"
+                      type="text"
+                      style={inputStyle}
+                      value={storageSettings.github.branch}
+                      onChange={(e) => updateStorageConfig('github', { branch: e.target.value })}
+                      disabled={!loaded}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div style={rowStyle}>
+                    <label style={labelStyle} htmlFor="settings-storage-github-basepath">
+                      Base Path
+                    </label>
+                    <input
+                      id="settings-storage-github-basepath"
+                      type="text"
+                      style={inputStyle}
+                      value={storageSettings.github.basePath}
+                      onChange={(e) => updateStorageConfig('github', { basePath: e.target.value })}
+                      disabled={!loaded}
+                      autoComplete="off"
+                    />
+                  </div>
+                </div>
+                <div style={rowStyle}>
+                  <label style={labelStyle} htmlFor="settings-storage-github-token">
+                    Token
+                  </label>
+                  <input
+                    id="settings-storage-github-token"
+                    type="password"
+                    style={inputStyle}
+                    value={storageSettings.github.token === API_KEY_SENTINEL ? '' : storageSettings.github.token}
+                    placeholder={storageSettings.github.token === API_KEY_SENTINEL ? 'configured — type to replace' : 'github_pat_...'}
+                    onChange={(e) => updateStorageConfig('github', { token: e.target.value })}
+                    disabled={!loaded}
+                    autoComplete="off"
+                  />
+                </div>
+              </>
+            )}
+
+            {storageSettings?.provider === 'webdav' && (
+              <>
+                <div style={rowStyle}>
+                  <label style={labelStyle} htmlFor="settings-storage-webdav-endpoint">
+                    Endpoint
+                  </label>
+                  <input
+                    id="settings-storage-webdav-endpoint"
+                    type="text"
+                    style={inputStyle}
+                    value={storageSettings.webdav.endpoint}
+                    onChange={(e) => updateStorageConfig('webdav', { endpoint: e.target.value })}
+                    disabled={!loaded}
+                    autoComplete="off"
+                  />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div style={rowStyle}>
+                    <label style={labelStyle} htmlFor="settings-storage-webdav-username">
+                      Username
+                    </label>
+                    <input
+                      id="settings-storage-webdav-username"
+                      type="text"
+                      style={inputStyle}
+                      value={storageSettings.webdav.username}
+                      onChange={(e) => updateStorageConfig('webdav', { username: e.target.value })}
+                      disabled={!loaded}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div style={rowStyle}>
+                    <label style={labelStyle} htmlFor="settings-storage-webdav-password">
+                      Password
+                    </label>
+                    <input
+                      id="settings-storage-webdav-password"
+                      type="password"
+                      style={inputStyle}
+                      value={storageSettings.webdav.password === API_KEY_SENTINEL ? '' : storageSettings.webdav.password}
+                      placeholder={storageSettings.webdav.password === API_KEY_SENTINEL ? 'configured — type to replace' : ''}
+                      onChange={(e) => updateStorageConfig('webdav', { password: e.target.value })}
+                      disabled={!loaded}
+                      autoComplete="off"
+                    />
+                  </div>
+                </div>
+                <div style={rowStyle}>
+                  <label style={labelStyle} htmlFor="settings-storage-webdav-basepath">
+                    Base Path
+                  </label>
+                  <input
+                    id="settings-storage-webdav-basepath"
+                    type="text"
+                    style={inputStyle}
+                    value={storageSettings.webdav.basePath}
+                    onChange={(e) => updateStorageConfig('webdav', { basePath: e.target.value })}
+                    disabled={!loaded}
+                    autoComplete="off"
+                  />
+                </div>
+              </>
+            )}
+
+            {storageSettings?.provider === 'ftp' && (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', gap: 10 }}>
+                  <div style={rowStyle}>
+                    <label style={labelStyle} htmlFor="settings-storage-ftp-host">
+                      Host
+                    </label>
+                    <input
+                      id="settings-storage-ftp-host"
+                      type="text"
+                      style={inputStyle}
+                      value={storageSettings.ftp.host}
+                      onChange={(e) => updateStorageConfig('ftp', { host: e.target.value })}
+                      disabled={!loaded}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div style={rowStyle}>
+                    <label style={labelStyle} htmlFor="settings-storage-ftp-port">
+                      Port
+                    </label>
+                    <input
+                      id="settings-storage-ftp-port"
+                      type="number"
+                      style={inputStyle}
+                      value={storageSettings.ftp.port}
+                      onChange={(e) => updateStorageConfig('ftp', { port: Number(e.target.value) || 21 })}
+                      disabled={!loaded}
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div style={rowStyle}>
+                    <label style={labelStyle} htmlFor="settings-storage-ftp-username">
+                      Username
+                    </label>
+                    <input
+                      id="settings-storage-ftp-username"
+                      type="text"
+                      style={inputStyle}
+                      value={storageSettings.ftp.username}
+                      onChange={(e) => updateStorageConfig('ftp', { username: e.target.value })}
+                      disabled={!loaded}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div style={rowStyle}>
+                    <label style={labelStyle} htmlFor="settings-storage-ftp-password">
+                      Password
+                    </label>
+                    <input
+                      id="settings-storage-ftp-password"
+                      type="password"
+                      style={inputStyle}
+                      value={storageSettings.ftp.password === API_KEY_SENTINEL ? '' : storageSettings.ftp.password}
+                      placeholder={storageSettings.ftp.password === API_KEY_SENTINEL ? 'configured — type to replace' : ''}
+                      onChange={(e) => updateStorageConfig('ftp', { password: e.target.value })}
+                      disabled={!loaded}
+                      autoComplete="off"
+                    />
+                  </div>
+                </div>
+                <div style={rowStyle}>
+                  <label style={labelStyle} htmlFor="settings-storage-ftp-basepath">
+                    Base Path
+                  </label>
+                  <input
+                    id="settings-storage-ftp-basepath"
+                    type="text"
+                    style={inputStyle}
+                    value={storageSettings.ftp.basePath}
+                    onChange={(e) => updateStorageConfig('ftp', { basePath: e.target.value })}
+                    disabled={!loaded}
+                    autoComplete="off"
+                  />
+                </div>
+                <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={storageSettings.ftp.secure}
+                    onChange={(e) => updateStorageConfig('ftp', { secure: e.target.checked })}
+                    disabled={!loaded}
+                  />
+                  Use FTPS
+                </label>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-tertiary)', marginTop: 6 }}>
+                  Secure enables FTPS. Leave Base Path empty to write at the login root.
+                </div>
+              </>
+            )}
+
+            {storageSettings?.provider === 's3' && (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div style={rowStyle}>
+                    <label style={labelStyle} htmlFor="settings-storage-s3-endpoint">
+                      Endpoint
+                    </label>
+                    <input
+                      id="settings-storage-s3-endpoint"
+                      type="text"
+                      style={inputStyle}
+                      value={storageSettings.s3.endpoint}
+                      onChange={(e) => updateStorageConfig('s3', { endpoint: e.target.value })}
+                      disabled={!loaded}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div style={rowStyle}>
+                    <label style={labelStyle} htmlFor="settings-storage-s3-region">
+                      Region
+                    </label>
+                    <input
+                      id="settings-storage-s3-region"
+                      type="text"
+                      style={inputStyle}
+                      value={storageSettings.s3.region}
+                      onChange={(e) => updateStorageConfig('s3', { region: e.target.value })}
+                      disabled={!loaded}
+                      autoComplete="off"
+                    />
+                  </div>
+                </div>
+                <div style={rowStyle}>
+                  <label style={labelStyle} htmlFor="settings-storage-s3-bucket">
+                    Bucket
+                  </label>
+                  <input
+                    id="settings-storage-s3-bucket"
+                    type="text"
+                    style={inputStyle}
+                    value={storageSettings.s3.bucket}
+                    onChange={(e) => updateStorageConfig('s3', { bucket: e.target.value })}
+                    disabled={!loaded}
+                    autoComplete="off"
+                  />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div style={rowStyle}>
+                    <label style={labelStyle} htmlFor="settings-storage-s3-access-key">
+                      Access Key ID
+                    </label>
+                    <input
+                      id="settings-storage-s3-access-key"
+                      type="text"
+                      style={inputStyle}
+                      value={storageSettings.s3.accessKeyId}
+                      onChange={(e) => updateStorageConfig('s3', { accessKeyId: e.target.value })}
+                      disabled={!loaded}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div style={rowStyle}>
+                    <label style={labelStyle} htmlFor="settings-storage-s3-secret-key">
+                      Secret Access Key
+                    </label>
+                    <input
+                      id="settings-storage-s3-secret-key"
+                      type="password"
+                      style={inputStyle}
+                      value={storageSettings.s3.secretAccessKey === API_KEY_SENTINEL ? '' : storageSettings.s3.secretAccessKey}
+                      placeholder={storageSettings.s3.secretAccessKey === API_KEY_SENTINEL ? 'configured — type to replace' : ''}
+                      onChange={(e) => updateStorageConfig('s3', { secretAccessKey: e.target.value })}
+                      disabled={!loaded}
+                      autoComplete="off"
+                    />
+                  </div>
+                </div>
+                <div style={rowStyle}>
+                  <label style={labelStyle} htmlFor="settings-storage-s3-basepath">
+                    Base Path
+                  </label>
+                  <input
+                    id="settings-storage-s3-basepath"
+                    type="text"
+                    style={inputStyle}
+                    value={storageSettings.s3.basePath}
+                    onChange={(e) => updateStorageConfig('s3', { basePath: e.target.value })}
+                    disabled={!loaded}
+                    autoComplete="off"
+                  />
+                </div>
+                <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={storageSettings.s3.forcePathStyle}
+                    onChange={(e) => updateStorageConfig('s3', { forcePathStyle: e.target.checked })}
+                    disabled={!loaded}
+                  />
+                  Force path-style URLs
+                </label>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-tertiary)', marginTop: 6 }}>
+                  Leave Endpoint empty for AWS S3; set it for S3-compatible services.
+                </div>
+              </>
+            )}
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button
+                className="btn btn-ghost"
+                onClick={handleTestStorage}
+                disabled={!loaded || !storageSettings || storageStatus === 'testing' || storageStatus === 'saving'}
+                style={{ padding: '6px 14px' }}
+              >
+                {storageStatus === 'testing' ? 'Testing...' : 'Test'}
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleSaveStorage}
+                disabled={!loaded || !storageSettings || storageStatus === 'testing' || storageStatus === 'saving'}
+                style={{ gap: 6, padding: '6px 14px' }}
+              >
+                <Save size={14} />
+                {storageStatus === 'saving' ? 'Saving...' : 'Save Storage'}
+              </button>
+            </div>
+
+            {storageStatus !== 'idle' && storageMessage && (
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: '6px 10px',
+                  fontSize: 'var(--font-size-xs)',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  ...(storageStatus === 'success'
+                    ? {
+                        color: 'var(--text-primary)',
+                        background: 'var(--bg-tertiary)',
+                        borderColor: 'var(--border-color)'
+                      }
+                    : storageStatus === 'error'
+                      ? {
+                          color: 'var(--text-primary)',
+                          background: 'var(--bg-active)',
+                          borderColor: 'var(--text-secondary)'
+                        }
+                      : {
+                          color: 'var(--text-secondary)',
+                          background: 'var(--bg-secondary)',
+                          borderColor: 'var(--border-light)'
+                        })
+                }}
+              >
+                {storageStatus === 'success' && <Check size={12} />}
+                {storageStatus === 'error' && <X size={12} />}
+                {storageMessage}
+              </div>
+            )}
           </div>
 
           {/* AI Configuration */}
@@ -812,6 +1383,139 @@ function SettingsPanel({ onClose, onThemeChange }: SettingsPanelProps) {
               >
                 Tip: after copying the Base URL, close this guide and paste it into the Base URL
                 field, choose the matching Provider, then enter your API key and Save.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showStorageGuide && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1100
+          }}
+          onClick={() => setShowStorageGuide(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Storage Configuration Guide"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 640,
+              maxWidth: '90vw',
+              maxHeight: '80vh',
+              background: 'var(--bg-primary)',
+              borderRadius: 'var(--radius-lg)',
+              boxShadow: 'var(--shadow-lg)',
+              border: '1px solid var(--border-color)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden'
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '14px 18px',
+                borderBottom: '1px solid var(--border-light)',
+                flexShrink: 0
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 'var(--font-size-md)',
+                  fontWeight: 600,
+                  color: 'var(--text-primary)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8
+                }}
+              >
+                <BookOpen size={16} /> How to Configure Storage
+              </span>
+              <button
+                className="btn-icon"
+                onClick={() => setShowStorageGuide(false)}
+                title="Close"
+                aria-label="Close storage guide"
+                style={{ width: 26, height: 26 }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <div
+              style={{
+                overflowY: 'auto',
+                padding: 16,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12
+              }}
+            >
+              {STORAGE_GUIDE.map((entry) => (
+                <div
+                  key={entry.name}
+                  style={{
+                    border: '1px solid var(--border-light)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: 12,
+                    background: 'var(--bg-secondary)'
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 'var(--font-size-base)',
+                      fontWeight: 600,
+                      color: 'var(--text-primary)',
+                      marginBottom: 8
+                    }}
+                  >
+                    {entry.name}
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 'var(--font-size-xs)',
+                      color: 'var(--text-primary)',
+                      marginBottom: 8
+                    }}
+                  >
+                    {entry.fields.join(', ')}
+                  </div>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: 'var(--font-size-xs)',
+                      color: 'var(--text-tertiary)',
+                      lineHeight: 1.5
+                    }}
+                  >
+                    {entry.notes}
+                  </p>
+                </div>
+              ))}
+
+              <p
+                style={{
+                  fontSize: 'var(--font-size-xs)',
+                  color: 'var(--text-tertiary)',
+                  marginTop: 4,
+                  marginBottom: 0,
+                  lineHeight: 1.5
+                }}
+              >
+                Architecture note: StorageProvider only performs file operations. SyncManager
+                owns index files, conflict policy, versions, and incremental sync decisions.
               </p>
             </div>
           </div>

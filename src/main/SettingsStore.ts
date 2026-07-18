@@ -16,9 +16,49 @@ import {
  */
 const ENCRYPTED_PREFIX = 'enc:v1:'
 
-export function getDefaults(): AppSettings {
+function getDefaultStorageSettings(workspacePath: string): AppSettings['storage'] {
   return {
-    workspacePath: join(app.getPath('documents'), DEFAULT_WORKSPACE),
+    provider: 'local',
+    local: {
+      rootPath: workspacePath
+    },
+    github: {
+      owner: '',
+      repo: '',
+      branch: 'main',
+      basePath: '',
+      token: ''
+    },
+    webdav: {
+      endpoint: '',
+      username: '',
+      password: '',
+      basePath: ''
+    },
+    ftp: {
+      host: '',
+      port: 21,
+      username: '',
+      password: '',
+      secure: false,
+      basePath: ''
+    },
+    s3: {
+      endpoint: '',
+      region: 'us-east-1',
+      bucket: '',
+      accessKeyId: '',
+      secretAccessKey: '',
+      basePath: '',
+      forcePathStyle: false
+    }
+  }
+}
+
+export function getDefaults(): AppSettings {
+  const workspacePath = join(app.getPath('documents'), DEFAULT_WORKSPACE)
+  return {
+    workspacePath,
     ai: {
       provider: 'none',
       apiKey: '',
@@ -26,7 +66,8 @@ export function getDefaults(): AppSettings {
       baseUrl: DEFAULT_AI_BASE_URL
     },
     pin: { ...DEFAULT_PIN_CONFIG },
-    theme: 'light'
+    theme: 'light',
+    storage: getDefaultStorageSettings(workspacePath)
   }
 }
 
@@ -36,7 +77,7 @@ export function getSettingsPath(): string {
 
 let cachedSettings: AppSettings | null = null
 
-function encryptApiKey(plain: string): string {
+function encryptSecret(plain: string): string {
   if (!plain) return ''
   if (!safeStorage.isEncryptionAvailable()) {
     // Some Linux desktops without a keyring can't do real encryption. In
@@ -45,14 +86,14 @@ function encryptApiKey(plain: string): string {
     // any other process the user runs, so this doesn't make things worse
     // than plaintext. We still tag it as encrypted so decryption knows.
     console.warn(
-      '[SettingsStore] safeStorage encryption unavailable; API key will be obfuscated only.'
+      '[SettingsStore] safeStorage encryption unavailable; secret values will be obfuscated only.'
     )
   }
   const buf = safeStorage.encryptString(plain)
   return ENCRYPTED_PREFIX + buf.toString('base64')
 }
 
-function decryptApiKey(stored: string): string {
+function decryptSecret(stored: string): string {
   if (!stored) return ''
   if (!stored.startsWith(ENCRYPTED_PREFIX)) {
     // Legacy plaintext value from before the encryption change — accept it
@@ -64,10 +105,69 @@ function decryptApiKey(stored: string): string {
     return safeStorage.decryptString(Buffer.from(b64, 'base64'))
   } catch (err) {
     console.warn(
-      '[SettingsStore] Failed to decrypt API key (keychain changed?); clearing.',
+      '[SettingsStore] Failed to decrypt secret value (keychain changed?); clearing.',
       err
     )
     return ''
+  }
+}
+
+function mergeStorageSettings(
+  defaults: AppSettings['storage'],
+  parsed?: Partial<AppSettings['storage']>
+): AppSettings['storage'] {
+  return {
+    ...defaults,
+    ...parsed,
+    local: { ...defaults.local, ...parsed?.local },
+    github: { ...defaults.github, ...parsed?.github },
+    webdav: { ...defaults.webdav, ...parsed?.webdav },
+    ftp: { ...defaults.ftp, ...parsed?.ftp },
+    s3: { ...defaults.s3, ...parsed?.s3 }
+  }
+}
+
+function decryptStorageSettings(storage: AppSettings['storage']): AppSettings['storage'] {
+  return {
+    ...storage,
+    github: {
+      ...storage.github,
+      token: decryptSecret(storage.github.token)
+    },
+    webdav: {
+      ...storage.webdav,
+      password: decryptSecret(storage.webdav.password)
+    },
+    ftp: {
+      ...storage.ftp,
+      password: decryptSecret(storage.ftp.password)
+    },
+    s3: {
+      ...storage.s3,
+      secretAccessKey: decryptSecret(storage.s3.secretAccessKey)
+    }
+  }
+}
+
+function encryptStorageSettings(storage: AppSettings['storage']): AppSettings['storage'] {
+  return {
+    ...storage,
+    github: {
+      ...storage.github,
+      token: encryptSecret(storage.github.token)
+    },
+    webdav: {
+      ...storage.webdav,
+      password: encryptSecret(storage.webdav.password)
+    },
+    ftp: {
+      ...storage.ftp,
+      password: encryptSecret(storage.ftp.password)
+    },
+    s3: {
+      ...storage.s3,
+      secretAccessKey: encryptSecret(storage.s3.secretAccessKey)
+    }
   }
 }
 
@@ -92,12 +192,14 @@ export function getSettings(): AppSettings {
       ...defaults,
       ...parsed,
       ai: { ...defaults.ai, ...parsed.ai },
-      pin: { ...defaults.pin, ...parsed.pin }
+      pin: { ...defaults.pin, ...parsed.pin },
+      storage: mergeStorageSettings(defaults.storage, parsed.storage)
     }
 
     // Decrypt if encrypted; leave alone if legacy plaintext (migrated on
     // next save).
-    merged.ai.apiKey = decryptApiKey(merged.ai.apiKey)
+    merged.ai.apiKey = decryptSecret(merged.ai.apiKey)
+    merged.storage = decryptStorageSettings(merged.storage)
 
     cachedSettings = merged
     return cachedSettings
@@ -123,8 +225,9 @@ export function saveSettings(settings: AppSettings): void {
     ...settings,
     ai: {
       ...settings.ai,
-      apiKey: encryptApiKey(settings.ai.apiKey)
-    }
+      apiKey: encryptSecret(settings.ai.apiKey)
+    },
+    storage: encryptStorageSettings(settings.storage)
   }
 
   writeFileSync(settingsPath, JSON.stringify(onDisk, null, 2), 'utf-8')
@@ -133,7 +236,29 @@ export function saveSettings(settings: AppSettings): void {
 
 export function setSettings(partial: Partial<AppSettings>): AppSettings {
   const current = getSettings()
-  const updated: AppSettings = { ...current, ...partial }
+  const updated: AppSettings = {
+    ...current,
+    ...partial,
+    ai: partial.ai ? { ...current.ai, ...partial.ai } : current.ai,
+    pin: partial.pin ? { ...current.pin, ...partial.pin } : current.pin,
+    storage: partial.storage
+      ? mergeStorageSettings(current.storage, partial.storage)
+      : current.storage
+  }
+  if (
+    partial.workspacePath &&
+    !partial.storage &&
+    current.storage.provider === 'local' &&
+    current.storage.local.rootPath === current.workspacePath
+  ) {
+    updated.storage = {
+      ...updated.storage,
+      local: {
+        ...updated.storage.local,
+        rootPath: partial.workspacePath
+      }
+    }
+  }
   saveSettings(updated)
   return updated
 }

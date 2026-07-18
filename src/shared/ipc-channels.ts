@@ -13,6 +13,11 @@ export const IPC = {
   FILE_HISTORY_LIST: 'file:history:list',
   FILE_HISTORY_READ: 'file:history:read',
   FILE_HISTORY_RESTORE: 'file:history:restore',
+  FILE_TRASH_LIST: 'file:trash:list',
+  FILE_TRASH_RESTORE: 'file:trash:restore',
+  FILE_TRASH_DELETE: 'file:trash:delete',
+  FILE_TRASH_EMPTY: 'file:trash:empty',
+  FILE_TRASH_OPEN: 'file:trash:open',
   /** Broadcast event name (not invoked). Payload: FileChangedEvent. */
   FILE_CHANGED_EVENT: 'file:changed',
   /** Broadcast event when the file tree structure changes. Payload: NoteFile[]. */
@@ -57,6 +62,7 @@ export const IPC = {
   AI_TOOL_EXECUTED: 'ai:toolExecuted',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
+  STORAGE_TEST_CONFIG: 'storage:testConfig',
   DIALOG_OPEN_FILE: 'dialog:openFile',
   DIALOG_OPEN_DIRECTORY: 'dialog:openDirectory',
   DIALOG_SAVE_FILE: 'dialog:saveFile',

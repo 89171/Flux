@@ -60,6 +60,21 @@ export interface FileHistoryReadResult extends FileHistoryEntry {
   content: string
 }
 
+export interface TrashEntry {
+  id: string
+  name: string
+  originalPath: string
+  type: 'file' | 'directory'
+  deletedAt: number
+  size: number
+  format?: NoteFormat
+}
+
+export interface TrashRestoreResult {
+  restoredPath: string
+  entry: NoteFile
+}
+
 // ============ Plugin System Types ============
 
 export interface PluginManifest {
@@ -320,6 +335,7 @@ export interface AppSettings {
   }
   pin: PinConfig
   theme: 'light' | 'dark'
+  storage: StorageSettings
   /**
    * User's explicit enable/disable choice per plugin. Missing entries
    * fall back to the plugin's manifest.autoActivate default. Written
@@ -353,4 +369,64 @@ export interface SearchResult {
   lineText: string
   matchStart: number
   matchEnd: number
+}
+
+// ============ Storage Provider Types ============
+
+export type StorageProviderId = 'local' | 'github' | 'webdav' | 'ftp' | 's3'
+
+export interface StorageFile {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+  size: number
+  updatedAt: number
+  etag?: string
+}
+
+export interface LocalStorageConfig {
+  rootPath: string
+}
+
+export interface GitHubStorageConfig {
+  owner: string
+  repo: string
+  branch: string
+  basePath: string
+  token: string
+}
+
+export interface WebDAVStorageConfig {
+  endpoint: string
+  username: string
+  password: string
+  basePath: string
+}
+
+export interface FTPStorageConfig {
+  host: string
+  port: number
+  username: string
+  password: string
+  secure: boolean
+  basePath: string
+}
+
+export interface S3StorageConfig {
+  endpoint: string
+  region: string
+  bucket: string
+  accessKeyId: string
+  secretAccessKey: string
+  basePath: string
+  forcePathStyle: boolean
+}
+
+export interface StorageSettings {
+  provider: StorageProviderId
+  local: LocalStorageConfig
+  github: GitHubStorageConfig
+  webdav: WebDAVStorageConfig
+  ftp: FTPStorageConfig
+  s3: S3StorageConfig
 }

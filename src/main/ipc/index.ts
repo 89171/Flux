@@ -7,6 +7,7 @@ import type { PluginManager } from '../PluginManager'
 import type { PluginInstaller } from '../PluginInstaller'
 import type { FileSystemManager } from '../FileSystemManager'
 import type { AIService } from '../AIService'
+import { testStorageSettings, type StorageManager } from '../storage'
 import { getSettings, setSettings, setPluginEnabled, updateAISettings } from '../SettingsStore'
 import { API_KEY_SENTINEL } from '@shared/constants'
 import type {
@@ -15,6 +16,7 @@ import type {
   AppSettings,
   FileChangedEvent,
   NoteFormat,
+  StorageSettings,
   SearchResult,
   UpdateCheckResult
 } from '@shared/types'
@@ -35,7 +37,8 @@ export function registerIPC(
   pluginManager: PluginManager,
   pluginInstaller: PluginInstaller,
   fsManager: FileSystemManager,
-  aiService: AIService
+  aiService: AIService,
+  storageManager: StorageManager
 ): void {
   // ============ File IPC ============
 
@@ -150,6 +153,29 @@ export function registerIPC(
       content: result.content
     })
     return result
+  })
+
+  ipcMain.handle(IPC.FILE_TRASH_LIST, async () => {
+    return fsManager.listTrash()
+  })
+
+  ipcMain.handle(IPC.FILE_TRASH_RESTORE, async (_event, id: string) => {
+    return fsManager.restoreTrashEntry(id)
+  })
+
+  ipcMain.handle(IPC.FILE_TRASH_DELETE, async (_event, id: string) => {
+    fsManager.permanentlyDeleteTrashEntry(id)
+    return true
+  })
+
+  ipcMain.handle(IPC.FILE_TRASH_EMPTY, async () => {
+    fsManager.emptyTrash()
+    return true
+  })
+
+  ipcMain.handle(IPC.FILE_TRASH_OPEN, async () => {
+    await shell.openPath(fsManager.getTrashPath())
+    return true
   })
 
   ipcMain.handle(
@@ -574,8 +600,54 @@ ${htmlBody}
 
   const maskSettings = (s: AppSettings): AppSettings => ({
     ...s,
-    ai: { ...s.ai, apiKey: s.ai.apiKey ? API_KEY_SENTINEL : '' }
+    ai: { ...s.ai, apiKey: s.ai.apiKey ? API_KEY_SENTINEL : '' },
+    storage: {
+      ...s.storage,
+      github: {
+        ...s.storage.github,
+        token: s.storage.github.token ? API_KEY_SENTINEL : ''
+      },
+      webdav: {
+        ...s.storage.webdav,
+        password: s.storage.webdav.password ? API_KEY_SENTINEL : ''
+      },
+      ftp: {
+        ...s.storage.ftp,
+        password: s.storage.ftp.password ? API_KEY_SENTINEL : ''
+      },
+      s3: {
+        ...s.storage.s3,
+        secretAccessKey: s.storage.s3.secretAccessKey ? API_KEY_SENTINEL : ''
+      }
+    }
   })
+
+  const preserveStorageSecrets = (partial: Partial<AppSettings>): Partial<AppSettings> => {
+    if (!partial.storage) return partial
+    const current = getSettings().storage
+    const storage: StorageSettings = {
+      ...current,
+      ...partial.storage,
+      local: { ...current.local, ...partial.storage.local },
+      github: { ...current.github, ...partial.storage.github },
+      webdav: { ...current.webdav, ...partial.storage.webdav },
+      ftp: { ...current.ftp, ...partial.storage.ftp },
+      s3: { ...current.s3, ...partial.storage.s3 }
+    }
+    if (partial.storage.github?.token === API_KEY_SENTINEL) {
+      storage.github.token = current.github.token
+    }
+    if (partial.storage.webdav?.password === API_KEY_SENTINEL) {
+      storage.webdav.password = current.webdav.password
+    }
+    if (partial.storage.ftp?.password === API_KEY_SENTINEL) {
+      storage.ftp.password = current.ftp.password
+    }
+    if (partial.storage.s3?.secretAccessKey === API_KEY_SENTINEL) {
+      storage.s3.secretAccessKey = current.s3.secretAccessKey
+    }
+    return { ...partial, storage }
+  }
 
   ipcMain.handle(IPC.SETTINGS_GET, async () => {
     // Return a masked copy so the plaintext API key never enters renderer
@@ -591,12 +663,21 @@ ${htmlBody}
       const { apiKey: _stripped, ...aiRest } = effective.ai
       effective = { ...effective, ai: aiRest as AppSettings['ai'] }
     }
+    effective = preserveStorageSecrets(effective)
     const updated = setSettings(effective)
     if (effective.workspacePath) {
       fsManager.setWorkspacePath(effective.workspacePath)
     }
+    if (effective.storage || effective.workspacePath) {
+      storageManager.configure(updated.storage)
+    }
     return maskSettings(updated)
   })
+
+  ipcMain.handle(
+    IPC.STORAGE_TEST_CONFIG,
+    async (_event, storage: StorageSettings) => testStorageSettings(preserveStorageSecrets({ storage }).storage!)
+  )
 
   // ============ Dialog IPC ============
   // Handlers preserve the opts declared on the preload surface (title,

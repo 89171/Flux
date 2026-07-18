@@ -1,9 +1,10 @@
 import { create } from 'zustand'
-import type { NoteFile } from '@shared/types'
+import type { NoteFile, TrashEntry, TrashRestoreResult } from '@shared/types'
 
 interface FileState {
   /** File tree as an array of top-level entries (root level). */
   tree: NoteFile[]
+  trash: TrashEntry[]
   currentFile: NoteFile | null
   currentContent: string
   /** mtime observed when `currentFile` was loaded, in ms since epoch. */
@@ -25,6 +26,11 @@ interface FileState {
   applyExternalChange: (path: string, content: string, mtime: number) => void
   createFile: (parentPath: string, name: string, isDir: boolean) => Promise<void>
   deleteFile: (path: string) => Promise<void>
+  loadTrash: () => Promise<void>
+  restoreTrashEntry: (id: string) => Promise<TrashRestoreResult>
+  permanentlyDeleteTrashEntry: (id: string) => Promise<void>
+  emptyTrash: () => Promise<void>
+  openTrashFolder: () => Promise<void>
   renameFile: (oldPath: string, newName: string) => Promise<void>
   moveFile: (sourcePath: string, targetDir: string) => Promise<void>
   openFolder: () => Promise<void>
@@ -39,8 +45,13 @@ function clearAutosaveTimer(): void {
   }
 }
 
+function isSameOrChildPath(path: string, parentPath: string): boolean {
+  return path === parentPath || path.startsWith(`${parentPath}/`)
+}
+
 export const useFileStore = create<FileState>((set, get) => ({
   tree: [],
+  trash: [],
   currentFile: null,
   currentContent: '',
   currentMtime: null,
@@ -211,11 +222,70 @@ export const useFileStore = create<FileState>((set, get) => ({
     try {
       await window.flux.file.delete(path)
       const { currentFile } = get()
-      if (currentFile?.path === path) {
-        set({ currentFile: null, currentContent: '', currentMtime: null })
+      if (currentFile && isSameOrChildPath(currentFile.path, path)) {
+        clearAutosaveTimer()
+        set({
+          currentFile: null,
+          currentContent: '',
+          currentMtime: null,
+          isDirty: false,
+          hasConflict: false,
+          fileError: null
+        })
       }
+      await get().loadTrash()
     } catch (err) {
       console.error('Failed to delete file:', err)
+      throw err
+    }
+  },
+
+  loadTrash: async () => {
+    try {
+      const trash = await window.flux.file.trash.list()
+      set({ trash })
+    } catch (err) {
+      console.error('Failed to load trash:', err)
+      set({ trash: [] })
+    }
+  },
+
+  restoreTrashEntry: async (id) => {
+    try {
+      const result = await window.flux.file.trash.restore(id)
+      await get().loadTrash()
+      return result
+    } catch (err) {
+      console.error('Failed to restore trash item:', err)
+      throw err
+    }
+  },
+
+  permanentlyDeleteTrashEntry: async (id) => {
+    try {
+      await window.flux.file.trash.delete(id)
+      await get().loadTrash()
+    } catch (err) {
+      console.error('Failed to permanently delete trash item:', err)
+      throw err
+    }
+  },
+
+  emptyTrash: async () => {
+    try {
+      await window.flux.file.trash.empty()
+      set({ trash: [] })
+    } catch (err) {
+      console.error('Failed to empty trash:', err)
+      throw err
+    }
+  },
+
+  openTrashFolder: async () => {
+    try {
+      await window.flux.file.trash.open()
+    } catch (err) {
+      console.error('Failed to open trash folder:', err)
       throw err
     }
   },
@@ -250,11 +320,13 @@ export const useFileStore = create<FileState>((set, get) => ({
       await window.flux.settings.set({ workspacePath: folderPath })
       set({
         workspacePath: folderPath,
+        trash: [],
         currentFile: null,
         currentContent: '',
         currentMtime: null
       })
       await get().loadTree()
+      await get().loadTrash()
     } catch (err) {
       console.error('Failed to open folder:', err)
     }

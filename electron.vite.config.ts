@@ -2,6 +2,9 @@ import { resolve } from 'path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 
+const DEFAULT_TLDRAW_LICENSE_KEY =
+  'tldraw-jimmy-zhu-2027-07-17/WyJsLUQ4RXlMciIsWyIqLnRvb2xnYXJkZW4ueHl6Il0sOSwiMjAyNy0wNy0xNyJd.ZurBhW4L3cSjEc1rW398Hlge8lHL2VvvnSlqsi3o+OGkieOP0Fhho30OqXaVXiE6m/nDEUe5PNvdIB1VJ5YDYw'
+
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
@@ -45,13 +48,12 @@ export default defineConfig({
         process.env.NODE_ENV === 'production' ? 'production' : 'development'
       ),
       'window.EXCALIDRAW_ASSET_PATH': JSON.stringify('/'),
-      // tldraw commercial licence key. Read from the environment at
-      // build time so the key is not checked into source. Falls back
-      // to a build-time constant if the env var is absent (e.g. local
-      // dev without the secret). The runtime reads this global in
-      // WhiteboardEditor.tsx.
+      // tldraw commercial licence key. An environment variable wins so CI
+      // or release builds can rotate keys without code changes; otherwise
+      // the bundled project key below keeps local builds licensed. The
+      // runtime reads this global in WhiteboardEditor.tsx.
       'window.FLUX_TLDRAW_LICENSE_KEY': JSON.stringify(
-        process.env.FLUX_TLDRAW_LICENSE_KEY ?? ''
+        process.env.FLUX_TLDRAW_LICENSE_KEY ?? DEFAULT_TLDRAW_LICENSE_KEY
       )
     },
     optimizeDeps: {

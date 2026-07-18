@@ -1,4 +1,4 @@
-import { join, dirname, basename, relative, resolve as pathResolve } from 'path'
+import { join, dirname, basename, extname, relative, resolve as pathResolve } from 'path'
 import {
   existsSync,
   readdirSync,
@@ -6,6 +6,7 @@ import {
   writeFileSync,
   mkdirSync,
   statSync,
+  lstatSync,
   unlinkSync,
   rmdirSync,
   renameSync,
@@ -18,14 +19,23 @@ import type {
   FileHistoryReadResult,
   NoteFile,
   NoteFormat,
-  SearchResult
+  SearchResult,
+  TrashEntry,
+  TrashRestoreResult
 } from '@shared/types'
 
 const HISTORY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 const HISTORY_ROOT = '.flux/history'
+const TRASH_ROOT = '.flux/trash'
+const TRASH_ITEMS_ROOT = '.flux/trash/items'
+const TRASH_METADATA_ROOT = '.flux/trash/metadata'
 
 interface StoredHistoryEntry extends FileHistoryEntry {
   content: string
+}
+
+interface StoredTrashEntry extends TrashEntry {
+  storageName: string
 }
 
 /**
@@ -84,6 +94,18 @@ export class FileSystemManager {
     return this.resolvePath(HISTORY_ROOT)
   }
 
+  private getTrashRootPath(): string {
+    return this.resolvePath(TRASH_ROOT)
+  }
+
+  private getTrashItemsRootPath(): string {
+    return this.resolvePath(TRASH_ITEMS_ROOT)
+  }
+
+  private getTrashMetadataRootPath(): string {
+    return this.resolvePath(TRASH_METADATA_ROOT)
+  }
+
   private getHistoryKey(relativePath: string): string {
     return Buffer.from(relativePath, 'utf-8')
       .toString('base64')
@@ -98,6 +120,43 @@ export class FileSystemManager {
 
   private isHistoryId(id: string): boolean {
     return /^\d{13}-[a-z0-9]+$/.test(id)
+  }
+
+  private ensureTrashDirectories(): void {
+    mkdirSync(this.getTrashItemsRootPath(), { recursive: true })
+    mkdirSync(this.getTrashMetadataRootPath(), { recursive: true })
+  }
+
+  private getTrashMetadataPath(id: string): string {
+    if (!this.isHistoryId(id)) throw new Error(`Invalid trash id: ${id}`)
+    return join(this.getTrashMetadataRootPath(), `${id}.json`)
+  }
+
+  private isSafeTrashStorageName(storageName: string): boolean {
+    return (
+      !!storageName &&
+      storageName !== '.' &&
+      storageName !== '..' &&
+      !storageName.includes('/') &&
+      !storageName.includes('\\')
+    )
+  }
+
+  private getTrashItemPath(entry: StoredTrashEntry): string {
+    if (!this.isSafeTrashStorageName(entry.storageName)) {
+      throw new Error(`Invalid trash storage name: ${entry.storageName}`)
+    }
+    return join(this.getTrashItemsRootPath(), entry.storageName)
+  }
+
+  private assertUserManagedPath(relativePath: string): void {
+    const normalized = relativePath.replace(/\\/g, '/').replace(/^\/+/, '')
+    if (!normalized || normalized === '.') {
+      throw new Error('Cannot delete the workspace root')
+    }
+    if (normalized === '.flux' || normalized.startsWith('.flux/')) {
+      throw new Error('Cannot modify Flux internal data')
+    }
   }
 
   private pruneHistory(): void {
@@ -254,6 +313,155 @@ export class FileSystemManager {
     return { content: entry.content, mtime: statSync(fullPath).mtime.getTime() }
   }
 
+  private getPathSize(fullPath: string): number {
+    const stats = lstatSync(fullPath)
+    if (!stats.isDirectory()) return stats.size
+
+    let size = 0
+    for (const entry of readdirSync(fullPath, { withFileTypes: true })) {
+      size += this.getPathSize(join(fullPath, entry.name))
+    }
+    return size
+  }
+
+  private createTrashId(): string {
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  }
+
+  private readStoredTrashEntry(id: string): StoredTrashEntry {
+    const parsed = JSON.parse(readFileSync(this.getTrashMetadataPath(id), 'utf-8')) as StoredTrashEntry
+    if (!this.isHistoryId(parsed.id) || parsed.id !== id) {
+      throw new Error(`Invalid trash metadata id: ${id}`)
+    }
+    if (parsed.type !== 'file' && parsed.type !== 'directory') {
+      throw new Error(`Invalid trash metadata type: ${id}`)
+    }
+    if (!this.isSafeTrashStorageName(parsed.storageName)) {
+      throw new Error(`Invalid trash metadata storage name: ${id}`)
+    }
+    return parsed
+  }
+
+  private toTrashEntry(entry: StoredTrashEntry): TrashEntry {
+    return {
+      id: entry.id,
+      name: entry.name,
+      originalPath: entry.originalPath,
+      type: entry.type,
+      deletedAt: entry.deletedAt,
+      size: entry.size,
+      format: entry.format
+    }
+  }
+
+  private getAvailableRestoreTarget(
+    originalPath: string,
+    type: 'file' | 'directory'
+  ): { relativePath: string; fullPath: string } {
+    let targetPath = this.resolvePath(originalPath)
+    if (!existsSync(targetPath)) return { relativePath: originalPath, fullPath: targetPath }
+
+    const parentPath = dirname(originalPath)
+    const hasParent = parentPath !== '.'
+    const name = basename(originalPath)
+    const ext = type === 'file' ? extname(name) : ''
+    const stem = ext ? name.slice(0, -ext.length) : name
+
+    for (let i = 1; i < 1000; i++) {
+      const suffix = i === 1 ? ' restored' : ` restored ${i}`
+      const candidateName = `${stem}${suffix}${ext}`
+      const candidateRelativePath = hasParent ? join(parentPath, candidateName) : candidateName
+      targetPath = this.resolvePath(candidateRelativePath)
+      if (!existsSync(targetPath)) {
+        return { relativePath: candidateRelativePath, fullPath: targetPath }
+      }
+    }
+
+    throw new Error(`Unable to find a restore path for: ${originalPath}`)
+  }
+
+  listTrash(): TrashEntry[] {
+    const metadataRoot = this.getTrashMetadataRootPath()
+    if (!existsSync(metadataRoot)) return []
+
+    const entries: TrashEntry[] = []
+    for (const file of readdirSync(metadataRoot, { withFileTypes: true })) {
+      if (!file.isFile() || !file.name.endsWith('.json')) continue
+      const metadataPath = join(metadataRoot, file.name)
+      try {
+        const parsed = JSON.parse(readFileSync(metadataPath, 'utf-8')) as StoredTrashEntry
+        if (!this.isHistoryId(parsed.id) || !this.isSafeTrashStorageName(parsed.storageName)) {
+          throw new Error('Invalid trash metadata')
+        }
+        if (!existsSync(this.getTrashItemPath(parsed))) {
+          unlinkSync(metadataPath)
+          continue
+        }
+        entries.push(this.toTrashEntry(parsed))
+      } catch {
+        unlinkSync(metadataPath)
+      }
+    }
+
+    entries.sort((a, b) => b.deletedAt - a.deletedAt)
+    return entries
+  }
+
+  restoreTrashEntry(id: string): TrashRestoreResult {
+    const entry = this.readStoredTrashEntry(id)
+    this.assertUserManagedPath(entry.originalPath)
+
+    const itemPath = this.getTrashItemPath(entry)
+    if (!existsSync(itemPath)) throw new Error(`Trash item does not exist: ${id}`)
+
+    const target = this.getAvailableRestoreTarget(entry.originalPath, entry.type)
+    const targetDir = dirname(target.fullPath)
+    if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true })
+
+    renameSync(itemPath, target.fullPath)
+    unlinkSync(this.getTrashMetadataPath(id))
+
+    const stats = lstatSync(target.fullPath)
+    const noteFile: NoteFile = {
+      id: this.pathToId(target.relativePath),
+      name: basename(target.fullPath),
+      path: target.relativePath,
+      type: entry.type,
+      format: entry.type === 'file' ? this.detectFormat(target.relativePath) : undefined,
+      createdAt: stats.birthtime.getTime(),
+      updatedAt: stats.mtime.getTime()
+    }
+
+    this.invalidateTree('mutation')
+    return { restoredPath: target.relativePath, entry: noteFile }
+  }
+
+  permanentlyDeleteTrashEntry(id: string): void {
+    const entry = this.readStoredTrashEntry(id)
+    const itemPath = this.getTrashItemPath(entry)
+    if (existsSync(itemPath)) {
+      const stats = lstatSync(itemPath)
+      if (stats.isDirectory()) {
+        this.removeDirRecursive(itemPath)
+      } else {
+        unlinkSync(itemPath)
+      }
+    }
+    unlinkSync(this.getTrashMetadataPath(id))
+  }
+
+  emptyTrash(): void {
+    const trashRoot = this.getTrashRootPath()
+    if (existsSync(trashRoot)) {
+      this.removeDirRecursive(trashRoot)
+    }
+  }
+
+  getTrashPath(): string {
+    this.ensureTrashDirectories()
+    return this.getTrashRootPath()
+  }
+
   /**
    * Start (or restart) the chokidar watcher. Any external filesystem
    * change (Finder rename, git checkout, another editor) invalidates the
@@ -398,7 +606,7 @@ export class FileSystemManager {
   readFileWithMeta(relativePath: string): { content: string; mtime: number } {
     const fullPath = this.resolvePath(relativePath)
     const content = readFileSync(fullPath, 'utf-8')
-    const stats = statSync(fullPath)
+    const stats = lstatSync(fullPath)
     return { content, mtime: stats.mtime.getTime() }
   }
 
@@ -488,15 +696,48 @@ export class FileSystemManager {
   }
 
   delete(relativePath: string): void {
+    this.assertUserManagedPath(relativePath)
     const fullPath = this.resolvePath(relativePath)
     const stats = statSync(fullPath)
 
     if (stats.isDirectory()) {
       this.snapshotDirectoryRecursive(relativePath, 'delete')
-      this.removeDirRecursive(fullPath)
     } else {
       this.createHistorySnapshot(relativePath, 'delete')
-      unlinkSync(fullPath)
+    }
+
+    this.ensureTrashDirectories()
+    let id = this.createTrashId()
+    let storageName = `${id}-${basename(fullPath)}`
+    let trashPath = join(this.getTrashItemsRootPath(), storageName)
+    while (existsSync(trashPath)) {
+      id = this.createTrashId()
+      storageName = `${id}-${basename(fullPath)}`
+      trashPath = join(this.getTrashItemsRootPath(), storageName)
+    }
+
+    const entry: StoredTrashEntry = {
+      id,
+      storageName,
+      name: basename(fullPath),
+      originalPath: relativePath,
+      type: stats.isDirectory() ? 'directory' : 'file',
+      deletedAt: Date.now(),
+      size: this.getPathSize(fullPath),
+      format: stats.isDirectory() ? undefined : this.detectFormat(relativePath)
+    }
+
+    const metadataPath = this.getTrashMetadataPath(id)
+    writeFileSync(metadataPath, JSON.stringify(entry), 'utf-8')
+    try {
+      renameSync(fullPath, trashPath)
+    } catch (err) {
+      try {
+        unlinkSync(metadataPath)
+      } catch {
+        // best-effort rollback
+      }
+      throw err
     }
     this.invalidateTree('mutation')
   }
