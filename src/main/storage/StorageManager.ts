@@ -10,6 +10,7 @@ export class StorageManager {
   private settings: StorageSettings
   private provider: StorageProvider
   private connected = false
+  private configureListeners: Array<() => void> = []
 
   constructor(settings: StorageSettings) {
     this.settings = settings
@@ -20,14 +21,33 @@ export class StorageManager {
     this.settings = settings
     this.provider = this.createProvider(settings.provider)
     this.connected = false
+    for (const listener of this.configureListeners) {
+      try {
+        listener()
+      } catch (err) {
+        console.warn('[StorageManager] configure listener threw:', err)
+      }
+    }
   }
 
   getProviderName(): string {
     return this.provider.name
   }
 
+  getSettings(): StorageSettings {
+    return this.settings
+  }
+
   getProvider(): StorageProvider {
     return this.provider
+  }
+
+  onConfigure(listener: () => void): () => void {
+    this.configureListeners.push(listener)
+    return () => {
+      const idx = this.configureListeners.indexOf(listener)
+      if (idx >= 0) this.configureListeners.splice(idx, 1)
+    }
   }
 
   async connect(): Promise<void> {

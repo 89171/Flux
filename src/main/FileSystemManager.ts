@@ -1,4 +1,4 @@
-import { join, dirname, basename, extname, relative, resolve as pathResolve } from 'path'
+import { join, dirname, basename, extname, relative, resolve as pathResolve, posix } from 'path'
 import {
   existsSync,
   readdirSync,
@@ -10,9 +10,11 @@ import {
   unlinkSync,
   rmdirSync,
   renameSync,
-  realpathSync
+  realpathSync,
+  cpSync
 } from 'fs'
 import chokidar, { type FSWatcher } from 'chokidar'
+import { randomUUID } from 'crypto'
 import type {
   FileHistoryAction,
   FileHistoryEntry,
@@ -20,15 +22,26 @@ import type {
   NoteFile,
   NoteFormat,
   SearchResult,
+  StaticAssetReadResult,
+  StaticAssetSaveResult,
   TrashEntry,
   TrashRestoreResult
 } from '@shared/types'
+import { MARKDOWN_ASSETS_DIR, STATIC_ASSETS_ROOT } from '@shared/constants'
 
 const HISTORY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 const HISTORY_ROOT = '.flux/history'
 const TRASH_ROOT = '.flux/trash'
 const TRASH_ITEMS_ROOT = '.flux/trash/items'
 const TRASH_METADATA_ROOT = '.flux/trash/metadata'
+
+const STATIC_ASSET_MIME_EXTENSIONS: Record<string, string> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'image/svg+xml': '.svg'
+}
 
 interface StoredHistoryEntry extends FileHistoryEntry {
   content: string
@@ -44,6 +57,11 @@ interface StoredTrashEntry extends TrashEntry {
  * app wires the two in main/index.ts.
  */
 export type FormatResolver = (filePath: string) => NoteFormat
+
+export type FileMutation =
+  | { type: 'write'; path: string }
+  | { type: 'delete'; path: string }
+  | { type: 'move'; oldPath: string; newPath: string }
 
 /**
  * File tree change kinds. `snapshot` fires on initial build + after big
@@ -61,6 +79,8 @@ export class FileSystemManager {
   private watcher: FSWatcher | null = null
   private rebuildTimer: NodeJS.Timeout | null = null
   private treeListeners: Array<(tree: NoteFile[], reason: TreeChangeReason) => void> = []
+  private mutationListeners: Array<(mutation: FileMutation) => void> = []
+  private mutationSuspendDepth = 0
 
   constructor(workspacePath: string, formatResolver?: FormatResolver) {
     this.workspacePath = workspacePath
@@ -80,6 +100,52 @@ export class FileSystemManager {
     if (!existsSync(this.workspacePath)) {
       mkdirSync(this.workspacePath, { recursive: true })
     }
+  }
+
+  private normalizeRelativePath(relativePath: string): string {
+    return relativePath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+  }
+
+  isStaticAssetPath(relativePath: string): boolean {
+    const normalized = this.normalizeRelativePath(relativePath)
+    const parts = normalized.split('/').filter(Boolean)
+    return (
+      normalized === STATIC_ASSETS_ROOT ||
+      normalized.startsWith(`${STATIC_ASSETS_ROOT}/`) ||
+      parts.includes(MARKDOWN_ASSETS_DIR)
+    )
+  }
+
+  private getStaticAssetDir(ownerPath?: string): string {
+    if (!ownerPath) return `${STATIC_ASSETS_ROOT}/images`
+
+    const normalizedOwner = this.normalizeRelativePath(ownerPath)
+    const ownerDir = posix.dirname(normalizedOwner)
+    const baseDir = ownerDir === '.' ? '' : ownerDir
+    return baseDir ? `${baseDir}/${MARKDOWN_ASSETS_DIR}` : MARKDOWN_ASSETS_DIR
+  }
+
+  private getStaticAssetExtension(fileName?: string, mimeType?: string): string {
+    const normalizedMime = mimeType?.toLowerCase().split(';')[0]?.trim() ?? ''
+    const byMime = STATIC_ASSET_MIME_EXTENSIONS[normalizedMime]
+    if (byMime) return byMime
+
+    const byName = extname(fileName ?? '').toLowerCase()
+    if (Object.values(STATIC_ASSET_MIME_EXTENSIONS).includes(byName)) return byName
+
+    throw new Error(`Unsupported static asset type: ${mimeType || fileName || 'unknown'}`)
+  }
+
+  private getStaticAssetMimeType(extension: string, mimeType?: string): string {
+    const normalizedMime = mimeType?.toLowerCase().split(';')[0]?.trim() ?? ''
+    if (STATIC_ASSET_MIME_EXTENSIONS[normalizedMime]) return normalizedMime
+    const found = Object.entries(STATIC_ASSET_MIME_EXTENSIONS)
+      .find(([, ext]) => ext === extension)
+    return found?.[0] ?? 'application/octet-stream'
+  }
+
+  private getStaticAssetMimeTypeForPath(relativePath: string): string {
+    return this.getStaticAssetMimeType(extname(relativePath).toLowerCase())
   }
 
   setWorkspacePath(path: string): void {
@@ -189,6 +255,8 @@ export class FileSystemManager {
   }
 
   private createHistorySnapshot(relativePath: string, action: FileHistoryAction): void {
+    if (this.isStaticAssetPath(relativePath)) return
+
     let fullPath: string
     try {
       fullPath = this.resolvePath(relativePath)
@@ -309,6 +377,7 @@ export class FileSystemManager {
     const dir = dirname(fullPath)
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
     writeFileSync(fullPath, entry.content, 'utf-8')
+    this.notifyMutation({ type: 'write', path: relativePath })
     if (!existedBefore) this.invalidateTree('mutation')
     return { content: entry.content, mtime: statSync(fullPath).mtime.getTime() }
   }
@@ -433,6 +502,7 @@ export class FileSystemManager {
     }
 
     this.invalidateTree('mutation')
+    this.notifyMutation({ type: 'write', path: target.relativePath })
     return { restoredPath: target.relativePath, entry: noteFile }
   }
 
@@ -482,7 +552,7 @@ export class FileSystemManager {
       // trigger rebuilds for hidden files or bundled deps.
       ignored: (targetPath: string): boolean => {
         const name = basename(targetPath)
-        return name.startsWith('.') || name === 'node_modules'
+        return name.startsWith('.') || name === MARKDOWN_ASSETS_DIR || name === 'node_modules'
       },
       // Coarse-grained polling would kill CPU on big workspaces — stick to
       // native events. `awaitWriteFinish` waits for a file to stop growing
@@ -531,6 +601,35 @@ export class FileSystemManager {
     return () => {
       const idx = this.treeListeners.indexOf(listener)
       if (idx >= 0) this.treeListeners.splice(idx, 1)
+    }
+  }
+
+  /** Subscribe to local file mutations that should be mirrored to storage. */
+  onMutation(listener: (mutation: FileMutation) => void): () => void {
+    this.mutationListeners.push(listener)
+    return () => {
+      const idx = this.mutationListeners.indexOf(listener)
+      if (idx >= 0) this.mutationListeners.splice(idx, 1)
+    }
+  }
+
+  private notifyMutation(mutation: FileMutation): void {
+    if (this.mutationSuspendDepth > 0) return
+    for (const listener of this.mutationListeners) {
+      try {
+        listener(mutation)
+      } catch (err) {
+        console.warn('[FileSystemManager] mutation listener threw:', err)
+      }
+    }
+  }
+
+  suppressMutations<T>(fn: () => T): T {
+    this.mutationSuspendDepth += 1
+    try {
+      return fn()
+    } finally {
+      this.mutationSuspendDepth -= 1
     }
   }
 
@@ -620,6 +719,7 @@ export class FileSystemManager {
       this.createHistorySnapshot(relativePath, 'save')
     }
     writeFileSync(fullPath, content, 'utf-8')
+    this.notifyMutation({ type: 'write', path: relativePath })
   }
 
   /**
@@ -652,7 +752,70 @@ export class FileSystemManager {
       this.createHistorySnapshot(relativePath, 'save')
     }
     writeFileSync(fullPath, content, 'utf-8')
+    this.notifyMutation({ type: 'write', path: relativePath })
     return { ok: true, mtime: statSync(fullPath).mtime.getTime() }
+  }
+
+  writeBinaryFile(relativePath: string, data: Uint8Array): void {
+    const fullPath = this.resolvePath(relativePath)
+    const dir = dirname(fullPath)
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true })
+    }
+    writeFileSync(fullPath, Buffer.from(data))
+    this.notifyMutation({ type: 'write', path: relativePath })
+  }
+
+  saveStaticAsset(
+    data: Uint8Array,
+    opts: { ownerPath?: string; fileName?: string; mimeType?: string } = {}
+  ): StaticAssetSaveResult {
+    if (data.byteLength === 0) {
+      throw new Error('Cannot save an empty static asset')
+    }
+
+    const extension = this.getStaticAssetExtension(opts.fileName, opts.mimeType)
+    const mimeType = this.getStaticAssetMimeType(extension, opts.mimeType)
+    const now = new Date()
+    const year = String(now.getFullYear())
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const stamp = [
+      year,
+      month,
+      String(now.getDate()).padStart(2, '0'),
+      String(now.getHours()).padStart(2, '0'),
+      String(now.getMinutes()).padStart(2, '0'),
+      String(now.getSeconds()).padStart(2, '0'),
+      String(now.getMilliseconds()).padStart(3, '0')
+    ].join('')
+    const name = `image-${stamp}-${randomUUID().slice(0, 8)}${extension}`
+    const relativePath = `${this.getStaticAssetDir(opts.ownerPath)}/${name}`
+
+    this.writeBinaryFile(relativePath, data)
+
+    return {
+      path: relativePath,
+      name,
+      size: data.byteLength,
+      mimeType
+    }
+  }
+
+  readStaticAsset(relativePath: string): StaticAssetReadResult | null {
+    if (!this.isStaticAssetPath(relativePath)) {
+      throw new Error(`Refused non-static asset path: ${relativePath}`)
+    }
+
+    const fullPath = this.resolvePath(relativePath)
+    if (!existsSync(fullPath) || statSync(fullPath).isDirectory()) return null
+
+    const data = readFileSync(fullPath)
+    const mimeType = this.getStaticAssetMimeTypeForPath(relativePath)
+    return {
+      path: this.normalizeRelativePath(relativePath),
+      mimeType,
+      dataUrl: `data:${mimeType};base64,${data.toString('base64')}`
+    }
   }
 
   createFile(relativePath: string, content: string = ''): NoteFile {
@@ -666,6 +829,7 @@ export class FileSystemManager {
     }
 
     const stats = statSync(fullPath)
+    this.notifyMutation({ type: 'write', path: relativePath })
     this.invalidateTree('mutation')
     return {
       id: this.pathToId(relativePath),
@@ -684,6 +848,7 @@ export class FileSystemManager {
     mkdirSync(fullPath, { recursive: true })
 
     const stats = statSync(fullPath)
+    this.notifyMutation({ type: 'write', path: relativePath })
     this.invalidateTree('mutation')
     return {
       id: this.pathToId(relativePath),
@@ -740,6 +905,7 @@ export class FileSystemManager {
       throw err
     }
     this.invalidateTree('mutation')
+    this.notifyMutation({ type: 'delete', path: relativePath })
   }
 
   private snapshotDirectoryRecursive(relativeDir: string, action: FileHistoryAction): void {
@@ -812,6 +978,7 @@ export class FileSystemManager {
       this.moveHistory(oldPath, newPath)
     }
     this.invalidateTree('mutation')
+    this.notifyMutation({ type: 'move', oldPath, newPath })
   }
 
   move(sourcePath: string, targetDir: string): void {
@@ -839,6 +1006,80 @@ export class FileSystemManager {
       this.moveHistory(sourcePath, targetPath)
     }
     this.invalidateTree('mutation')
+    this.notifyMutation({ type: 'move', oldPath: sourcePath, newPath: targetPath })
+  }
+
+  /**
+   * Copy a file or directory into `targetDir`, returning the created node.
+   *
+   * Naming: if `targetDir` has no name clash the original name is kept;
+   * otherwise a " copy" / " copy 2" … suffix is appended (macOS-style) so
+   * a copy never overwrites an existing entry. Binary files and nested
+   * directories are preserved via a recursive filesystem copy.
+   */
+  copy(sourcePath: string, targetDir: string): NoteFile {
+    this.assertUserManagedPath(sourcePath)
+    const fullSource = this.resolvePath(sourcePath)
+    if (!existsSync(fullSource)) {
+      throw new Error(`Source does not exist: ${sourcePath}`)
+    }
+    const stats = statSync(fullSource)
+    const isDir = stats.isDirectory()
+
+    // Prevent copying a directory into itself or one of its descendants,
+    // which would recurse forever.
+    if (isDir) {
+      const normSource = sourcePath.replace(/\\/g, '/').replace(/\/+$/, '')
+      const normTarget = targetDir.replace(/\\/g, '/').replace(/\/+$/, '')
+      if (normTarget === normSource || normTarget.startsWith(`${normSource}/`)) {
+        throw new Error('Cannot copy a folder into itself')
+      }
+    }
+
+    const uniqueName = this.uniqueCopyName(targetDir, basename(fullSource), isDir)
+    const targetPath = join(targetDir, uniqueName)
+    this.assertUserManagedPath(targetPath)
+    const fullTarget = this.resolvePath(targetPath)
+
+    const dir = dirname(fullTarget)
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true })
+    }
+
+    cpSync(fullSource, fullTarget, { recursive: true })
+
+    const newStats = statSync(fullTarget)
+    this.invalidateTree('mutation')
+    this.notifyMutation({ type: 'write', path: targetPath })
+    return {
+      id: this.pathToId(targetPath),
+      name: uniqueName,
+      path: targetPath,
+      type: isDir ? 'directory' : 'file',
+      format: isDir ? undefined : this.detectFormat(fullTarget),
+      createdAt: newStats.birthtime.getTime(),
+      updatedAt: newStats.mtime.getTime()
+    }
+  }
+
+  /**
+   * Resolve a non-colliding name inside `targetDir`. Keeps the original
+   * name when free; otherwise inserts " copy" before the extension and
+   * bumps a counter until the name is unique.
+   */
+  private uniqueCopyName(targetDir: string, originalName: string, isDir: boolean): string {
+    if (!existsSync(this.resolvePath(join(targetDir, originalName)))) {
+      return originalName
+    }
+    const ext = isDir ? '' : extname(originalName)
+    const stem = isDir ? originalName : basename(originalName, ext)
+    let candidate = `${stem} copy${ext}`
+    let n = 2
+    while (existsSync(this.resolvePath(join(targetDir, candidate)))) {
+      candidate = `${stem} copy ${n}${ext}`
+      n += 1
+    }
+    return candidate
   }
 
   buildFileTree(): NoteFile[] {
@@ -858,6 +1099,7 @@ export class FileSystemManager {
     for (const entry of entries) {
       // Filter dotfiles and node_modules
       if (entry.name.startsWith('.')) continue
+      if (entry.name === MARKDOWN_ASSETS_DIR) continue
       if (entry.name === 'node_modules') continue
 
       const entryRelPath = relativeDir ? join(relativeDir, entry.name) : entry.name
@@ -926,6 +1168,7 @@ export class FileSystemManager {
       if (results.length >= maxResults) return
       // Reuse buildTree's filtering: skip dotfiles and node_modules
       if (entry.name.startsWith('.')) continue
+      if (entry.name === MARKDOWN_ASSETS_DIR) continue
       if (entry.name === 'node_modules') continue
 
       const entryRelPath = relativeDir ? join(relativeDir, entry.name) : entry.name

@@ -1,4 +1,4 @@
-import { basename } from 'path'
+import { basename, posix } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import type {
   AIRequest,
@@ -86,6 +86,35 @@ Decide ONLY whether the user's latest message is asking to create, generate, wri
 Rules:
 - If it is such a request, you MUST call create_file exactly once. Choose a concise filename relative to the workspace root with the correct extension (.md for markdown/articles, .todo for kanban, .mmd for mermaid, .puml for plantuml, .drawio, .mindmap, .bpmn, .dmn). Put the FULL requested document into the content argument. Do not ask for confirmation.
 - If the message is a normal question or chat that does not ask to create a file, do NOT call any tool and reply with an empty message.`
+
+function normalizeWorkspacePath(path: string): string {
+  return path.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+}
+
+function getUniqueWorkspacePath(
+  requestedPath: string,
+  exists: (path: string) => boolean
+): string {
+  const normalized = normalizeWorkspacePath(requestedPath)
+  if (!exists(normalized)) return normalized
+
+  const dir = posix.dirname(normalized)
+  const baseName = posix.basename(normalized)
+  const extension = posix.extname(baseName)
+  const stem = extension ? baseName.slice(0, -extension.length) : baseName
+  const parent = dir === '.' ? '' : dir
+
+  let suffix = 2
+  let candidate = ''
+  do {
+    candidate = parent
+      ? posix.join(parent, `${stem} ${suffix}${extension}`)
+      : `${stem} ${suffix}${extension}`
+    suffix += 1
+  } while (exists(candidate))
+
+  return candidate
+}
 
 export class AIService {
   conversations: Map<string, AIConversation> = new Map()
@@ -742,7 +771,8 @@ export class AIService {
       const content = String(args.content ?? '')
       if (!path) return { success: false, error: 'path is required' }
       try {
-        const created = this.fsManager.createFile(path, content)
+        const uniquePath = getUniqueWorkspacePath(path, (candidate) => this.fsManager!.exists(candidate))
+        const created = this.fsManager.createFile(uniquePath, content)
         return { success: true, filePath: created.path }
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) }

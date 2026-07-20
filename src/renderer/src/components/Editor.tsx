@@ -16,13 +16,13 @@ import {
   List as ListIcon,
   Download,
   ChevronDown,
+  GitBranch,
   History as HistoryIcon
 } from 'lucide-react'
 import MarkdownEditor from './MilkdownEditor'
 import PluginIframeEditor from './PluginIframeEditor'
 import CodeMirrorEditor from './CodeMirrorEditor'
 import Outline from './Outline'
-import EditorContextMenu, { type ContextMenuItem } from './EditorContextMenu'
 import FileHistoryDialog from './FileHistoryDialog'
 import type { DrawioEditorHandle } from './DrawioEditor'
 import type { MindmapEditorHandle } from './MindmapEditor'
@@ -51,7 +51,7 @@ const DmnEditor = lazy(() => import('./DmnEditor'))
 import { useFileStore } from '../stores/fileStore'
 import { usePluginStore } from '../stores/pluginStore'
 import FindReplace from './FindReplace'
-import type { FormatBinding, NoteFormat } from '@shared/types'
+import type { FormatBinding, NoteFile, NoteFormat } from '@shared/types'
 import {
   blobToBase64,
   buildStandaloneHtml,
@@ -215,12 +215,57 @@ interface ExportOption {
   disabled?: boolean
 }
 
+function isImageFile(file: File): boolean {
+  if (file.type.startsWith('image/')) return true
+  return /\.(png|jpe?g|gif|webp|svg)$/i.test(file.name)
+}
+
+function splitNotePath(path: string): { dir: string; name: string } {
+  const normalized = path.replace(/\\/g, '/')
+  const slashIndex = normalized.lastIndexOf('/')
+  if (slashIndex < 0) return { dir: '', name: normalized }
+  return {
+    dir: normalized.slice(0, slashIndex),
+    name: normalized.slice(slashIndex + 1)
+  }
+}
+
+function stripFileExtension(name: string): string {
+  return name.replace(/\.[^/.]+$/, '')
+}
+
+function joinNotePath(dir: string, name: string): string {
+  return dir ? `${dir}/${name}` : name
+}
+
+function collectTreePaths(nodes: NoteFile[], paths = new Set<string>()): Set<string> {
+  for (const node of nodes) {
+    paths.add(node.path)
+    if (node.children) collectTreePaths(node.children, paths)
+  }
+  return paths
+}
+
+function getUniqueMindmapPath(sourcePath: string, existingPaths: Set<string>): string {
+  const { dir, name } = splitNotePath(sourcePath)
+  const stem = stripFileExtension(name) || 'mindmap'
+  let candidate = joinNotePath(dir, `${stem}.mindmap`)
+  let suffix = 2
+  while (existingPaths.has(candidate)) {
+    candidate = joinNotePath(dir, `${stem} ${suffix}.mindmap`)
+    suffix += 1
+  }
+  return candidate
+}
+
 export default function Editor(): JSX.Element {
   const currentFile = useFileStore((s) => s.currentFile)
   const currentContent = useFileStore((s) => s.currentContent)
   const currentMtime = useFileStore((s) => s.currentMtime)
   const setContent = useFileStore((s) => s.setContent)
   const saveFile = useFileStore((s) => s.saveFile)
+  const openFile = useFileStore((s) => s.openFile)
+  const applyTreeUpdate = useFileStore((s) => s.applyTreeUpdate)
   const isDirty = useFileStore((s) => s.isDirty)
   const hasConflict = useFileStore((s) => s.hasConflict)
   const reloadCurrent = useFileStore((s) => s.reloadCurrent)
@@ -236,7 +281,6 @@ export default function Editor(): JSX.Element {
   const [showOutline, setShowOutline] = useState(false)
   const [showExportMenu, setShowExportMenu] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null)
   // Bumped when the active editor needs to re-read file contents.
   const [rendererKey, setRendererKey] = useState(0)
   const drawioHandleRef = useRef<DrawioEditorHandle | null>(null)
@@ -330,8 +374,8 @@ export default function Editor(): JSX.Element {
         setShowFindReplace(true)
       }
     }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
+    window.addEventListener('keydown', handler, true)
+    return () => window.removeEventListener('keydown', handler, true)
   }, [saveFile])
 
   // Listen for find/replace and zoom events from menu/command palette
@@ -384,6 +428,10 @@ export default function Editor(): JSX.Element {
       // Check for external file drops (files with .path from Electron)
       const files = e.dataTransfer.files
       if (files && files.length > 0) {
+        if (isMarkdown && Array.from(files).some(isImageFile)) {
+          return
+        }
+
         const file = files[0] as File & { path?: string }
         if (file.path) {
           const detectedFormat = getFormatFromExtension(file.name, formatMap)
@@ -397,7 +445,7 @@ export default function Editor(): JSX.Element {
         }
       }
     },
-    [formatMap]
+    [formatMap, isMarkdown]
   )
 
   // AI Generate handler — dispatches up to App.tsx which owns aiPanelOpen
@@ -409,6 +457,32 @@ export default function Editor(): JSX.Element {
     if (!currentFile) return
     setShowHistory(true)
   }, [currentFile])
+
+  const handleCreateMindmapFromMarkdown = useCallback(async () => {
+    if (!currentFile || !isMarkdown) return
+    window.dispatchEvent(new CustomEvent('flux:flush-active-editor'))
+    const activeState = useFileStore.getState()
+    const sourceContent =
+      activeState.currentFile?.path === currentFile.path
+        ? activeState.currentContent
+        : currentContent
+    const fallbackContent = `# ${getExportBaseName(currentFile.name)}\n`
+
+    try {
+      const freshTree = await window.flux.file.getTree()
+      applyTreeUpdate(freshTree)
+      const targetPath = getUniqueMindmapPath(currentFile.path, collectTreePaths(freshTree))
+      const created = await window.flux.file.create(
+        targetPath,
+        sourceContent.trim() ? sourceContent : fallbackContent,
+        false
+      )
+      applyTreeUpdate(await window.flux.file.getTree())
+      await openFile(created)
+    } catch (err) {
+      console.error('Failed to create mindmap from markdown:', err)
+    }
+  }, [applyTreeUpdate, currentContent, currentFile, isMarkdown, openFile])
 
   // Pin to Desktop handler - opens a pinned note window
   const handlePin = useCallback(async () => {
@@ -724,45 +798,6 @@ export default function Editor(): JSX.Element {
     }
   }
 
-  // Context menu
-  const handleContextMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    const items: ContextMenuItem[] = [
-      {
-        label: 'Find',
-        action: () => { setFindReplaceMode('find'); setShowFindReplace(true) }
-      },
-      {
-        label: 'Replace',
-        action: () => { setFindReplaceMode('replace'); setShowFindReplace(true) }
-      },
-      { label: '', action: () => {}, separator: true },
-      {
-        label: 'Save',
-        action: () => saveFile(),
-        disabled: !isDirty
-      },
-      { label: '', action: () => {}, separator: true }
-    ]
-    if (isMarkdown) {
-      items.push({
-        label: showOutline ? 'Hide Outline' : 'Show Outline',
-        action: () => setShowOutline((v) => !v)
-      })
-    }
-    if (exportOptions.length > 0) {
-      items.push({ label: '', action: () => {}, separator: true })
-      for (const option of exportOptions) {
-        items.push({
-          label: `Export as ${option.label}`,
-          action: () => { void option.action() },
-          disabled: option.disabled
-        })
-      }
-    }
-    setContextMenu({ x: e.clientX, y: e.clientY, items })
-  }, [saveFile, isDirty, isMarkdown, showOutline, exportOptions])
-
   /**
    * Render the inner editor for the active binding. The outer
    * ErrorBoundary + Suspense wrap this so chunk-load failures and
@@ -798,6 +833,7 @@ export default function Editor(): JSX.Element {
           key={file.path}
           value={currentContent}
           onChange={(md) => setContentForFile(file.path, md)}
+          filePath={file.path}
           className="markdown-editor-wrapper"
         />
       )
@@ -1097,6 +1133,27 @@ export default function Editor(): JSX.Element {
             </button>
           )}
 
+          {isMarkdown && (
+            <button
+              className="editor-toolbar-btn"
+              onClick={handleCreateMindmapFromMarkdown}
+              title="Create Mindmap"
+              type="button"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                padding: '6px',
+                border: 'none',
+                borderRadius: '6px',
+                background: 'none',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer'
+              }}
+            >
+              <GitBranch size={15} />
+            </button>
+          )}
+
           {exportOptions.length > 0 && (
             <div
               onMouseDown={(e) => e.stopPropagation()}
@@ -1282,7 +1339,6 @@ export default function Editor(): JSX.Element {
       >
         <div
           className="editor-content"
-          onContextMenu={handleContextMenu}
           style={{
             flex: 1,
             overflow: 'auto',
@@ -1312,16 +1368,6 @@ export default function Editor(): JSX.Element {
           />
         )}
       </div>
-
-      {/* Context menu */}
-      {contextMenu && (
-        <EditorContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          actions={contextMenu.items}
-          onClose={() => setContextMenu(null)}
-        />
-      )}
 
       {showHistory && currentFile && (
         <FileHistoryDialog

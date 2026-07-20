@@ -51,6 +51,7 @@ function getAttachmentIcon(type: string) {
 export function AIPanel() {
   const messages = useAIStore((s) => s.messages)
   const isGenerating = useAIStore((s) => s.isGenerating)
+  const hasActiveFileCreation = useAIStore((s) => s.hasActiveFileCreation)
   const error = useAIStore((s) => s.error)
   const streamingContent = useAIStore((s) => s.streamingContent)
   const attachments = useAIStore((s) => s.attachments)
@@ -64,10 +65,12 @@ export function AIPanel() {
   const currentContent = useFileStore((s) => s.currentContent)
   const setContent = useFileStore((s) => s.setContent)
   const openFile = useFileStore((s) => s.openFile)
+  const applyTreeUpdate = useFileStore((s) => s.applyTreeUpdate)
   const tree = useFileStore((s) => s.tree)
 
   const [input, setInput] = useState('')
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
+  const handledToolMessageKeysRef = useRef<Set<string> | null>(null)
 
   const handleCopy = useCallback((content: string, idx: number) => {
     navigator.clipboard.writeText(content).then(() => {
@@ -106,10 +109,37 @@ export function AIPanel() {
       // Tree may not have refreshed yet — fetch it then retry
       const freshTree = await window.flux.file.getTree()
       const foundFresh = findInTree(freshTree)
-      if (foundFresh) openFile(foundFresh)
+      if (foundFresh) {
+        applyTreeUpdate(freshTree)
+        openFile(foundFresh)
+      }
     },
-    [tree, openFile]
+    [tree, openFile, applyTreeUpdate]
   )
+
+  useEffect(() => {
+    const toolMessageKeys = messages
+      .filter((msg) =>
+        msg.role === 'tool' &&
+        msg.toolEvent?.tool === 'create_file' &&
+        msg.toolEvent.result.success &&
+        msg.toolEvent.result.filePath
+      )
+      .map((msg) => `${msg.timestamp}:${msg.toolEvent!.result.filePath}`)
+
+    if (!handledToolMessageKeysRef.current) {
+      handledToolMessageKeysRef.current = new Set(toolMessageKeys)
+      return
+    }
+
+    for (const key of toolMessageKeys) {
+      if (handledToolMessageKeysRef.current.has(key)) continue
+      handledToolMessageKeysRef.current.add(key)
+
+      const filePath = key.slice(key.indexOf(':') + 1)
+      void handleOpenCreatedFile(filePath)
+    }
+  }, [messages, handleOpenCreatedFile])
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -137,7 +167,7 @@ export function AIPanel() {
   //   — AI text is appended below the original note content.
   const streamModeRef = useRef<'replace' | 'append'>('replace')
   useEffect(() => {
-    if (!streamToNote || !isGenerating || !streamingContent) return
+    if (!streamToNote || hasActiveFileCreation || !isGenerating || !streamingContent) return
     if (streamModeRef.current === 'replace') {
       setContent(streamingContent)
     } else {
@@ -145,7 +175,7 @@ export function AIPanel() {
       const separator = existing ? '\n\n' : ''
       setContent(existing + separator + streamingContent)
     }
-  }, [streamToNote, isGenerating, streamingContent, setContent])
+  }, [streamToNote, hasActiveFileCreation, isGenerating, streamingContent, setContent])
 
   const handleSend = useCallback(async () => {
     const prompt = input.trim()
@@ -326,7 +356,7 @@ export function AIPanel() {
                   </button>
                 </div>
                 <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</div>
-                {msg.role === 'assistant' && (
+                {msg.role === 'assistant' && !msg.hideApplyActions && (
                   <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
                     <button
                       className="btn btn-primary"

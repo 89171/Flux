@@ -7,6 +7,8 @@ interface AIState {
   messages: AIMessage[]
   error: string | null
   isPanelOpen: boolean
+  /** True while the current generation has already created a file via tool call. */
+  hasActiveFileCreation: boolean
   /** Accumulated text from the current streaming response. Empty when
    *  not generating. The AIPanel renders this live so the user sees
    *  text appear chunk-by-chunk instead of a spinner. */
@@ -33,6 +35,7 @@ export const useAIStore = create<AIState>((set, get) => ({
   messages: [],
   error: null,
   isPanelOpen: false,
+  hasActiveFileCreation: false,
   streamingContent: '',
   attachments: [],
   togglePanel: () => set((state) => ({ isPanelOpen: !state.isPanelOpen })),
@@ -40,7 +43,12 @@ export const useAIStore = create<AIState>((set, get) => ({
   closePanel: () => set({ isPanelOpen: false }),
 
   generate: async (prompt, format, context) => {
-    set({ isGenerating: true, error: null, streamingContent: '' })
+    set({
+      isGenerating: true,
+      error: null,
+      hasActiveFileCreation: false,
+      streamingContent: ''
+    })
     try {
       const request: AIRequest = {
         prompt,
@@ -66,22 +74,26 @@ export const useAIStore = create<AIState>((set, get) => ({
             set({ streamingContent: fullContent })
           },
           (conversationId) => {
-            const aiMsg: AIMessage = {
-              role: 'assistant',
-              content: fullContent,
-              timestamp: Date.now()
-            }
             set((state) => ({
-              messages: [...state.messages, aiMsg],
+              messages: [
+                ...state.messages,
+                {
+                  role: 'assistant',
+                  content: fullContent,
+                  timestamp: Date.now(),
+                  hideApplyActions: state.hasActiveFileCreation
+                }
+              ],
               conversationId: conversationId || get().conversationId,
               isGenerating: false,
+              hasActiveFileCreation: false,
               streamingContent: ''
             }))
             streamCleanup = null
             resolve()
           },
           (error) => {
-            set({ isGenerating: false, streamingContent: '', error })
+            set({ isGenerating: false, hasActiveFileCreation: false, streamingContent: '', error })
             streamCleanup = null
             reject(new Error(error))
           },
@@ -94,7 +106,11 @@ export const useAIStore = create<AIState>((set, get) => ({
               timestamp: Date.now(),
               toolEvent
             }
-            set((state) => ({ messages: [...state.messages, toolMsg] }))
+            set((state) => ({
+              messages: [...state.messages, toolMsg],
+              hasActiveFileCreation:
+                state.hasActiveFileCreation || toolEvent.tool === 'create_file'
+            }))
           }
         )
       })
@@ -103,6 +119,7 @@ export const useAIStore = create<AIState>((set, get) => ({
     } catch (err) {
       set({
         isGenerating: false,
+        hasActiveFileCreation: false,
         streamingContent: '',
         error: err instanceof Error ? err.message : String(err)
       })
@@ -115,7 +132,7 @@ export const useAIStore = create<AIState>((set, get) => ({
       streamCleanup()
       streamCleanup = null
     }
-    set({ isGenerating: false, streamingContent: '' })
+    set({ isGenerating: false, hasActiveFileCreation: false, streamingContent: '' })
   },
 
   addAttachment: (attachment) => set((state) => ({ attachments: [...state.attachments, attachment] })),

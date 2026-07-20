@@ -16,10 +16,21 @@ import type {
   AppSettings,
   FileChangedEvent,
   NoteFormat,
+  StaticAssetReadResult,
+  StaticAssetSaveRequest,
+  StaticAssetSaveResult,
   StorageSettings,
   SearchResult,
   UpdateCheckResult
 } from '@shared/types'
+
+function toUint8Array(data: StaticAssetSaveRequest['data']): Uint8Array {
+  if (data instanceof ArrayBuffer) return new Uint8Array(data)
+  if (ArrayBuffer.isView(data)) {
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  }
+  throw new Error('Invalid static asset payload')
+}
 
 function broadcastFileChanged(
   senderWebContentsId: number,
@@ -125,6 +136,13 @@ export function registerIPC(
     }
   )
 
+  ipcMain.handle(
+    IPC.FILE_COPY,
+    async (_event, sourcePath: string, targetDir: string) => {
+      return fsManager.copy(sourcePath, targetDir)
+    }
+  )
+
   ipcMain.handle(IPC.FILE_OPEN_EXTERNAL, async (_event, relativePath: string) => {
     const fullPath = fsManager.resolvePath(relativePath)
     await shell.openPath(fullPath)
@@ -136,6 +154,24 @@ export function registerIPC(
     shell.showItemInFolder(fullPath)
     return true
   })
+
+  ipcMain.handle(
+    IPC.FILE_STATIC_ASSET_SAVE,
+    async (_event, request: StaticAssetSaveRequest): Promise<StaticAssetSaveResult> => {
+      return fsManager.saveStaticAsset(toUint8Array(request.data), {
+        ownerPath: request.ownerPath,
+        fileName: request.fileName,
+        mimeType: request.mimeType
+      })
+    }
+  )
+
+  ipcMain.handle(
+    IPC.FILE_STATIC_ASSET_READ,
+    async (_event, relativePath: string): Promise<StaticAssetReadResult | null> => {
+      return fsManager.readStaticAsset(relativePath)
+    }
+  )
 
   ipcMain.handle(IPC.FILE_HISTORY_LIST, async (_event, relativePath: string) => {
     return fsManager.listFileHistory(relativePath)

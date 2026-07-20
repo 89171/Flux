@@ -14,6 +14,9 @@ import type {
   FileHistoryEntry,
   FileHistoryReadResult,
   SearchResult,
+  StaticAssetReadResult,
+  StaticAssetSaveRequest,
+  StaticAssetSaveResult,
   StorageSettings,
   TrashEntry,
   TrashRestoreResult,
@@ -47,9 +50,14 @@ const api = {
     delete: (path: string): Promise<boolean> => ipcRenderer.invoke(IPC.FILE_DELETE, path),
     rename: (oldPath: string, newPath: string): Promise<NoteFile> => ipcRenderer.invoke(IPC.FILE_RENAME, oldPath, newPath),
     move: (sourcePath: string, targetDir: string): Promise<NoteFile> => ipcRenderer.invoke(IPC.FILE_MOVE, sourcePath, targetDir),
+    copy: (sourcePath: string, targetDir: string): Promise<NoteFile> => ipcRenderer.invoke(IPC.FILE_COPY, sourcePath, targetDir),
     openExternal: (path: string): Promise<boolean> => ipcRenderer.invoke(IPC.FILE_OPEN_EXTERNAL, path),
     revealInFolder: (path: string): Promise<boolean> =>
       ipcRenderer.invoke(IPC.FILE_REVEAL_IN_FOLDER, path),
+    saveStaticAsset: (request: StaticAssetSaveRequest): Promise<StaticAssetSaveResult> =>
+      ipcRenderer.invoke(IPC.FILE_STATIC_ASSET_SAVE, request),
+    readStaticAsset: (path: string): Promise<StaticAssetReadResult | null> =>
+      ipcRenderer.invoke(IPC.FILE_STATIC_ASSET_READ, path),
     history: {
       list: (path: string): Promise<FileHistoryEntry[]> =>
         ipcRenderer.invoke(IPC.FILE_HISTORY_LIST, path),

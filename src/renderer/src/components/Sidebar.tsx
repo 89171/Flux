@@ -59,7 +59,10 @@ import {
   Waypoints,
   PanelLeftClose,
   History as HistoryIcon,
-  RotateCcw
+  RotateCcw,
+  Copy as CopyIcon,
+  Scissors,
+  ClipboardPaste
 } from 'lucide-react'
 import type { NoteFile, NoteFormat, TrashEntry } from '@shared/types'
 import { useFileStore } from '../stores/fileStore'
@@ -285,6 +288,7 @@ interface TreeNodeProps {
   expandedDirs: Set<string>
   toggleExpand: (node: NoteFile) => void
   currentFile: NoteFile | null
+  selectedPath: string | null
   onOpenFile: (node: NoteFile) => void
   onContextMenu: (e: ReactMouseEvent, node: NoteFile) => void
   renamingPath: string | null
@@ -307,6 +311,7 @@ function TreeNode({
   expandedDirs,
   toggleExpand,
   currentFile,
+  selectedPath,
   onOpenFile,
   onContextMenu,
   renamingPath,
@@ -324,7 +329,7 @@ function TreeNode({
 }: TreeNodeProps) {
   const isDir = node.type === 'directory'
   const isExpanded = expandedDirs.has(node.path)
-  const isSelected = currentFile?.path === node.path
+  const isSelected = currentFile?.path === node.path || selectedPath === node.path
   const isRenaming = renamingPath === node.path
   const isDragOver = dragOverPath === node.path
   const showCreating =
@@ -423,6 +428,7 @@ function TreeNode({
               expandedDirs={expandedDirs}
               toggleExpand={toggleExpand}
               currentFile={currentFile}
+              selectedPath={selectedPath}
               onOpenFile={onOpenFile}
               onContextMenu={onContextMenu}
               renamingPath={renamingPath}
@@ -518,7 +524,12 @@ function TrashPanel({
   )
 }
 
-export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
+interface SidebarProps {
+  showTrash: boolean
+  onCollapse?: () => void
+}
+
+export function Sidebar({ showTrash, onCollapse }: SidebarProps) {
   const tree = useFileStore((s) => s.tree)
   const trash = useFileStore((s) => s.trash)
   const currentFile = useFileStore((s) => s.currentFile)
@@ -535,6 +546,7 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const loadTree = useFileStore((s) => s.loadTree)
   const openFolder = useFileStore((s) => s.openFolder)
   const reloadCurrent = useFileStore((s) => s.reloadCurrent)
+  const copyFile = useFileStore((s) => s.copyFile)
 
   const plugins = usePluginStore((s) => s.plugins)
 
@@ -543,8 +555,18 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const [renamingPath, setRenamingPath] = useState<string | null>(null)
   const [creating, setCreating] = useState<CreatingState | null>(null)
   const [dragOverPath, setDragOverPath] = useState<string | null>(null)
-  const [showTrash, setShowTrash] = useState(false)
   const draggingPathRef = useRef<string | null>(null)
+  // Pending copy/cut for the file tree. `mode` distinguishes a copy
+  // (source is duplicated) from a cut (source is moved) on paste.
+  const [fileClipboard, setFileClipboard] = useState<{
+    path: string
+    name: string
+    mode: 'copy' | 'cut'
+  } | null>(null)
+  // The node targeted by keyboard copy/cut/paste. Tracked separately from
+  // `currentFile` so folders (which never open) can also be acted on.
+  const [selectedNode, setSelectedNode] = useState<NoteFile | null>(null)
+  const sidebarTreeRef = useRef<HTMLDivElement>(null)
   const [showNewFileMenu, setShowNewFileMenu] = useState(false)
   const [historyFile, setHistoryFile] = useState<NoteFile | null>(null)
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
@@ -603,18 +625,13 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
     void loadTrash()
   }, [loadTrash])
 
-  const handleToggleTrash = useCallback(() => {
-    setShowTrash((prev) => {
-      const next = !prev
-      if (next) {
-        setContextMenu(null)
-        setContextNewFileSubmenuOpen(false)
-        setCreating(null)
-        void loadTrash()
-      }
-      return next
-    })
-  }, [loadTrash])
+  useEffect(() => {
+    if (!showTrash) return
+    setContextMenu(null)
+    setContextNewFileSubmenuOpen(false)
+    setCreating(null)
+    void loadTrash()
+  }, [showTrash, loadTrash])
 
   const handleRefresh = useCallback(() => {
     if (showTrash) {
@@ -688,6 +705,31 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
       return next
     })
   }, [])
+
+  // Mark a node as the keyboard target and pull focus into the tree so the
+  // container's onKeyDown fires for Cmd/Ctrl+C/X/V. Editors don't autofocus
+  // on mount, so clicking a file keeps focus here until the user clicks into
+  // the editor — which is exactly when text-copy should take over instead.
+  const selectAndFocus = useCallback((node: NoteFile) => {
+    setSelectedNode(node)
+    sidebarTreeRef.current?.focus()
+  }, [])
+
+  const handleOpenFileSelect = useCallback(
+    (node: NoteFile) => {
+      selectAndFocus(node)
+      openFile(node)
+    },
+    [openFile, selectAndFocus]
+  )
+
+  const handleToggleExpandSelect = useCallback(
+    (node: NoteFile) => {
+      selectAndFocus(node)
+      toggleExpand(node)
+    },
+    [toggleExpand, selectAndFocus]
+  )
 
   // ---------- creation ----------
   const handleNewFile = useCallback((e: React.MouseEvent<HTMLElement>) => {
@@ -810,6 +852,8 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const handleContextMenu = useCallback((e: ReactMouseEvent, node: NoteFile) => {
     e.preventDefault()
     e.stopPropagation()
+    setSelectedNode(node)
+    sidebarTreeRef.current?.focus()
     setContextMenu({ x: e.clientX, y: e.clientY, node })
   }, [])
 
@@ -888,6 +932,71 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
       }
     },
     [deleteFile]
+  )
+
+  // ---------- copy / cut / paste ----------
+  const handleContextCopy = useCallback((node: NoteFile, mode: 'copy' | 'cut') => {
+    setContextMenu(null)
+    setFileClipboard({ path: node.path, name: node.name, mode })
+  }, [])
+
+  const handleContextPaste = useCallback(
+    async (node: NoteFile) => {
+      setContextMenu(null)
+      if (!fileClipboard) return
+      // Paste into the directory itself; for a file, into its parent dir.
+      const targetDir =
+        node.type === 'directory'
+          ? node.path
+          : node.path.substring(0, node.path.lastIndexOf('/'))
+      try {
+        if (fileClipboard.mode === 'copy') {
+          await copyFile(fileClipboard.path, targetDir)
+        } else {
+          const sourceParent = fileClipboard.path.substring(0, fileClipboard.path.lastIndexOf('/'))
+          // Cutting into the same folder is a no-op; skip to avoid a
+          // pointless move (and a same-name overwrite).
+          if (sourceParent !== targetDir) {
+            await moveFile(fileClipboard.path, targetDir)
+          }
+          setFileClipboard(null)
+        }
+        if (targetDir) {
+          setExpandedDirs((prev) => {
+            const next = new Set(prev)
+            next.add(targetDir)
+            return next
+          })
+        }
+      } catch (err) {
+        console.error('Failed to paste:', err)
+      }
+    },
+    [fileClipboard, copyFile, moveFile]
+  )
+
+  // Keyboard copy/cut/paste, scoped to the tree container so it never
+  // competes with the editor's own Cmd+C/V (that only fires once focus is
+  // inside the editor). Skips when a rename input is focused.
+  const handleTreeKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.nativeEvent.isComposing) return
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod) return
+      const active = document.activeElement
+      const tag = active?.tagName.toLowerCase()
+      if (tag === 'input' || tag === 'textarea') return
+      const key = e.key.toLowerCase()
+      const node = selectedNode
+      if ((key === 'c' || key === 'x') && node && node.id !== '__root__') {
+        e.preventDefault()
+        handleContextCopy(node, key === 'c' ? 'copy' : 'cut')
+      } else if (key === 'v' && fileClipboard && node) {
+        e.preventDefault()
+        handleContextPaste(node)
+      }
+    },
+    [selectedNode, fileClipboard, handleContextCopy, handleContextPaste]
   )
 
   // Close the context menu (and its submenu) on any window click.
@@ -1084,16 +1193,8 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
             <RefreshCw size={15} strokeWidth={1.8} />
           </button>
           <button
-            className={`sidebar-action-btn tooltip${showTrash ? ' active' : ''}`}
-            data-tooltip={showTrash ? 'Back to Explorer' : 'Trash'}
-            onClick={handleToggleTrash}
-            type="button"
-          >
-            <Trash2 size={15} strokeWidth={1.8} />
-          </button>
-          <button
             className="sidebar-action-btn tooltip"
-            data-tooltip="Collapse Explorer"
+            data-tooltip="Collapse Sidebar"
             onClick={onCollapse}
             type="button"
           >
@@ -1110,120 +1211,130 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
           onPermanentDelete={handlePermanentDeleteTrashEntry}
         />
       ) : (
-        <div
-          className="sidebar-tree"
-          onContextMenu={(e) => {
-            // Right-click on empty area → create at root level
-            if (e.target === e.currentTarget) {
-              e.preventDefault()
-              setContextMenu({ x: e.clientX, y: e.clientY, node: { type: 'directory', path: '', name: '', id: '__root__', createdAt: 0, updatedAt: 0 } })
-            }
-          }}
-        >
-        {/* Creating input — shown in both empty and non-empty states */}
-        {creating && creating.parentPath === '' && (
+        <>
           <div
-            className="tree-node"
-            style={{ paddingLeft: 8, background: 'var(--bg-hover)' }}
+            className="sidebar-tree"
+            ref={sidebarTreeRef}
+            tabIndex={-1}
+            style={{ outline: 'none' }}
+            onKeyDown={handleTreeKeyDown}
+            onContextMenu={(e) => {
+              // Right-click on empty area → create at root level
+              if (e.target === e.currentTarget) {
+                e.preventDefault()
+                const rootNode: NoteFile = { type: 'directory', path: '', name: '', id: '__root__', createdAt: 0, updatedAt: 0 }
+                setSelectedNode(rootNode)
+                sidebarTreeRef.current?.focus()
+                setContextMenu({ x: e.clientX, y: e.clientY, node: rootNode })
+              }
+            }}
           >
-            <span className="tree-chevron" />
-            <span className="tree-icon">
-                {creating.isDir ? (
-                  <Folder size={16} />
-                ) : creating.icon ? (
-                  <PluginIconRenderer icon={creating.icon} size={16} />
-                ) : (
-                  <FileText size={16} />
-                )}
-              </span>
-              <InlineEditInput
-                initialValue={creating.initialName || ''}
-                allowUnchanged={!!creating.initialName}
-                selectWithoutExtension={!creating.isDir}
-                placeholder={creating.isDir ? 'folder name' : 'note name'}
-                onSubmit={handleCreateSubmit}
-                onCancel={handleCreateCancel}
-              />
-          </div>
-        )}
-
-        {isEmpty ? (
-          <div className="empty-state">
-            <FileText size={32} style={{ color: 'var(--text-disabled)' }} />
-            <div>No files yet</div>
-            <div style={{ position: 'relative' }}>
-              <button
-                className="btn btn-primary"
-                onClick={handleNewFile}
-                data-new-file-anchor="empty-state"
-                type="button"
-                style={{ gap: 6 }}
-              >
-                <Plus size={14} /> New File
-              </button>
-              {showNewFileMenu && (
-                <div
-                  className="new-file-dropdown"
-                  style={{ top: dropdownPos.top, left: dropdownPos.left }}
-                >
-                  <div className="new-file-dropdown-header">
-                    <FileType size={13} />
-                    <span>New File Type</span>
-                  </div>
-                  {fileTypes.map((ft) => (
-                    <button
-                      key={`${ft.format}-${ft.extension}`}
-                      className="new-file-dropdown-item"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleNewFileWithType(ft)
-                      }}
-                      type="button"
-                    >
-                      <span className="new-file-dropdown-icon">
-                        {ft.icon ? (
-                          <PluginIconRenderer icon={ft.icon} size={16} />
-                        ) : (
-                          <BuiltinFormatIcon format={ft.format} size={16} />
-                        )}
-                      </span>
-                      <span className="new-file-dropdown-label">{ft.label}</span>
-                      <span className="new-file-dropdown-ext">.{ft.extension}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
+          {/* Creating input — shown in both empty and non-empty states */}
+          {creating && creating.parentPath === '' && (
+            <div
+              className="tree-node"
+              style={{ paddingLeft: 8, background: 'var(--bg-hover)' }}
+            >
+              <span className="tree-chevron" />
+              <span className="tree-icon">
+                  {creating.isDir ? (
+                    <Folder size={16} />
+                  ) : creating.icon ? (
+                    <PluginIconRenderer icon={creating.icon} size={16} />
+                  ) : (
+                    <FileText size={16} />
+                  )}
+                </span>
+                <InlineEditInput
+                  initialValue={creating.initialName || ''}
+                  allowUnchanged={!!creating.initialName}
+                  selectWithoutExtension={!creating.isDir}
+                  placeholder={creating.isDir ? 'folder name' : 'note name'}
+                  onSubmit={handleCreateSubmit}
+                  onCancel={handleCreateCancel}
+                />
             </div>
+          )}
+
+          {isEmpty ? (
+            <div className="empty-state">
+              <FileText size={32} style={{ color: 'var(--text-disabled)' }} />
+              <div>No files yet</div>
+              <div style={{ position: 'relative' }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleNewFile}
+                  data-new-file-anchor="empty-state"
+                  type="button"
+                  style={{ gap: 6 }}
+                >
+                  <Plus size={14} /> New File
+                </button>
+                {showNewFileMenu && (
+                  <div
+                    className="new-file-dropdown"
+                    style={{ top: dropdownPos.top, left: dropdownPos.left }}
+                  >
+                    <div className="new-file-dropdown-header">
+                      <FileType size={13} />
+                      <span>New File Type</span>
+                    </div>
+                    {fileTypes.map((ft) => (
+                      <button
+                        key={`${ft.format}-${ft.extension}`}
+                        className="new-file-dropdown-item"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleNewFileWithType(ft)
+                        }}
+                        type="button"
+                      >
+                        <span className="new-file-dropdown-icon">
+                          {ft.icon ? (
+                            <PluginIconRenderer icon={ft.icon} size={16} />
+                          ) : (
+                            <BuiltinFormatIcon format={ft.format} size={16} />
+                          )}
+                        </span>
+                        <span className="new-file-dropdown-label">{ft.label}</span>
+                        <span className="new-file-dropdown-ext">.{ft.extension}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <>
+              {tree.map((child) => (
+                <TreeNode
+                  key={child.id}
+                  node={child}
+                  level={0}
+                  expandedDirs={expandedDirs}
+                  toggleExpand={handleToggleExpandSelect}
+                  currentFile={currentFile}
+                  selectedPath={selectedNode?.path ?? null}
+                  onOpenFile={handleOpenFileSelect}
+                  onContextMenu={handleContextMenu}
+                  renamingPath={renamingPath}
+                  onRenameSubmit={handleRenameSubmit}
+                  onRenameCancel={handleRenameCancel}
+                  onDragStart={handleDragStart}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  dragOverPath={dragOverPath}
+                  creating={creating}
+                  onCreateSubmit={handleCreateSubmit}
+                  onCreateCancel={handleCreateCancel}
+                  extensionIconMap={extensionIconMap}
+                />
+              ))}
+            </>
+          )}
           </div>
-        ) : (
-          <>
-            {tree.map((child) => (
-              <TreeNode
-                key={child.id}
-                node={child}
-                level={0}
-                expandedDirs={expandedDirs}
-                toggleExpand={toggleExpand}
-                currentFile={currentFile}
-                onOpenFile={openFile}
-                onContextMenu={handleContextMenu}
-                renamingPath={renamingPath}
-                onRenameSubmit={handleRenameSubmit}
-                onRenameCancel={handleRenameCancel}
-                onDragStart={handleDragStart}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                dragOverPath={dragOverPath}
-                creating={creating}
-                onCreateSubmit={handleCreateSubmit}
-                onCreateCancel={handleCreateCancel}
-                extensionIconMap={extensionIconMap}
-              />
-            ))}
-          </>
-        )}
-        </div>
+        </>
       )}
 
       {/* Context menu */}
@@ -1316,6 +1427,40 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
               <Pencil size={14} /> Rename
             </div>
           )}
+
+          {/* Copy / Cut / Paste for note files & folders */}
+          {(contextMenu.node.id !== '__root__' || fileClipboard) && (
+            <div className="context-menu-divider" />
+          )}
+          {contextMenu.node.id !== '__root__' && (
+            <div
+              className="context-menu-item"
+              onClick={() => handleContextCopy(contextMenu.node, 'copy')}
+            >
+              <CopyIcon size={14} /> Copy
+            </div>
+          )}
+          {contextMenu.node.id !== '__root__' && (
+            <div
+              className="context-menu-item"
+              onClick={() => handleContextCopy(contextMenu.node, 'cut')}
+            >
+              <Scissors size={14} /> Cut
+            </div>
+          )}
+          {fileClipboard && (
+            <div
+              className="context-menu-item"
+              onClick={() => handleContextPaste(contextMenu.node)}
+            >
+              <ClipboardPaste size={14} /> Paste
+              <span style={{ marginLeft: 'auto', opacity: 0.45, fontSize: 11 }}>
+                {fileClipboard.name}
+              </span>
+            </div>
+          )}
+          <div className="context-menu-divider" />
+
           <div
             className="context-menu-item"
             onClick={() => handleOpenExternal(contextMenu.node)}

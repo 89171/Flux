@@ -152,6 +152,7 @@ export default function EditorContextMenu({
         return (
           <div
             key={idx}
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => handleItemClick(item)}
             onMouseEnter={(e) => {
               if (!disabled) e.currentTarget.style.background = 'var(--bg-hover)'

@@ -1514,8 +1514,9 @@ function SettingsPanel({ onClose, onThemeChange }: SettingsPanelProps) {
                   lineHeight: 1.5
                 }}
               >
-                Architecture note: StorageProvider only performs file operations. SyncManager
-                owns index files, conflict policy, versions, and incremental sync decisions.
+                Sync note: StorageMirror keeps the local workspace and selected provider in
+                sync using a local index. Conflicting remote edits are preserved as
+                .remote-conflict files.
               </p>
             </div>
           </div>

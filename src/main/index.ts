@@ -1,5 +1,7 @@
-import { app, BrowserWindow, Menu, shell } from 'electron'
+import { app, BrowserWindow, Menu, protocol, shell } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { existsSync, readFileSync } from 'fs'
+import { extname } from 'path'
 import { FileSystemManager } from './FileSystemManager'
 import { PluginManager } from './PluginManager'
 import { PluginInstaller } from './PluginInstaller'
@@ -8,7 +10,7 @@ import { AIService } from './AIService'
 import { registerIPC } from './ipc'
 import { getSettings, isPluginEnabled } from './SettingsStore'
 import { IPC } from '@shared/ipc-channels'
-import { StorageManager } from './storage'
+import { StorageManager, StorageMirror } from './storage'
 
 let windowManager: WindowManager
 let pluginManager: PluginManager
@@ -16,8 +18,94 @@ let pluginInstaller: PluginInstaller
 let fsManager: FileSystemManager
 let aiService: AIService
 let storageManager: StorageManager
+let storageMirror: StorageMirror
 
 let pendingOpenFile: string | null = null
+let staticAssetProtocolRegistered = false
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'flux-asset',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true
+    }
+  }
+])
+
+function getAssetContentType(path: string): string {
+  switch (extname(path).toLowerCase()) {
+    case '.png':
+      return 'image/png'
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg'
+    case '.gif':
+      return 'image/gif'
+    case '.webp':
+      return 'image/webp'
+    case '.svg':
+      return 'image/svg+xml; charset=utf-8'
+    default:
+      return 'application/octet-stream'
+  }
+}
+
+function getStaticAssetProtocolPath(url: string): string {
+  const parsed = new URL(url)
+  const relativePath = decodeURIComponent(`${parsed.hostname}${parsed.pathname}`)
+    .replace(/^\/+/, '')
+
+  if (!fsManager.isStaticAssetPath(relativePath)) {
+    throw new Error(`Refused non-static asset path: ${relativePath}`)
+  }
+
+  return fsManager.resolvePath(relativePath)
+}
+
+function registerStaticAssetProtocol(): void {
+  if (staticAssetProtocolRegistered) return
+
+  try {
+    protocol.handle('flux-asset', (request) => {
+      const assetPath = getStaticAssetProtocolPath(request.url)
+      if (!existsSync(assetPath)) {
+        console.warn('[StaticAssets] Asset not found:', assetPath)
+        return new Response('Not found', { status: 404 })
+      }
+      return new Response(readFileSync(assetPath), {
+        headers: {
+          'Content-Type': getAssetContentType(assetPath),
+          'Cache-Control': 'no-store'
+        }
+      })
+    })
+    staticAssetProtocolRegistered = true
+  } catch (err) {
+    console.warn('[StaticAssets] Failed to register flux-asset protocol:', err)
+    registerStaticAssetProtocolLegacy()
+  }
+}
+
+function registerStaticAssetProtocolLegacy(): void {
+  if (staticAssetProtocolRegistered) return
+
+  const registered = protocol.registerFileProtocol('flux-asset', (request, callback) => {
+    try {
+      callback({ path: getStaticAssetProtocolPath(request.url) })
+    } catch (err) {
+      console.warn('[StaticAssets] Failed to resolve asset URL:', err)
+      callback({ error: -6 })
+    }
+  })
+
+  staticAssetProtocolRegistered = registered
+  if (!registered) {
+    console.warn('[StaticAssets] Failed to register flux-asset protocol')
+  }
+}
 
 async function bootstrap(): Promise<void> {
   const settings = getSettings()
@@ -31,6 +119,7 @@ async function bootstrap(): Promise<void> {
   fsManager = new FileSystemManager(settings.workspacePath, (path) =>
     pluginManager.detectFormat(path)
   )
+  registerStaticAssetProtocol()
   // Give PluginManager the FSM handle so plugin.readFile/writeFile route
   // through the same workspace + realpath guards as core code.
   pluginManager.setFileSystemManager(fsManager)
@@ -49,6 +138,8 @@ async function bootstrap(): Promise<void> {
 
   // StorageManager owns the provider boundary used by future sync flows.
   storageManager = new StorageManager(settings.storage)
+  storageMirror = new StorageMirror(fsManager, storageManager)
+  storageMirror.start()
 
   // Register all IPC handlers
   registerIPC(windowManager, pluginManager, pluginInstaller, fsManager, aiService, storageManager)
@@ -265,6 +356,57 @@ function buildMenu(): void {
   Menu.setApplicationMenu(menu)
 }
 
+type NativeEditCommand = 'cut' | 'copy' | 'paste' | 'selectAll'
+
+function executeNativeEditCommand(window: BrowserWindow, command: NativeEditCommand): void {
+  const { webContents } = window
+  switch (command) {
+    case 'cut':
+      webContents.cut()
+      break
+    case 'copy':
+      webContents.copy()
+      break
+    case 'paste':
+      webContents.paste()
+      break
+    case 'selectAll':
+      webContents.selectAll()
+      break
+  }
+}
+
+function installNativeEditContextMenu(window: BrowserWindow): void {
+  const { webContents } = window
+
+  webContents.on('context-menu', (_event, params) => {
+    const { editFlags } = params
+    Menu.buildFromTemplate([
+      {
+        label: 'Cut',
+        enabled: editFlags.canCut,
+        click: () => executeNativeEditCommand(window, 'cut')
+      },
+      {
+        label: 'Copy',
+        enabled: editFlags.canCopy,
+        click: () => executeNativeEditCommand(window, 'copy')
+      },
+      {
+        label: 'Paste',
+        enabled: editFlags.canPaste,
+        click: () => executeNativeEditCommand(window, 'paste')
+      },
+      { type: 'separator' },
+      {
+        label: 'Select All',
+        enabled: editFlags.canSelectAll,
+        click: () => executeNativeEditCommand(window, 'selectAll')
+      }
+    ]).popup({ window })
+  })
+}
+
 // In dev, the running binary is node_modules/electron/dist/Electron.app,
 // so macOS shows "Electron" in the menu bar / About / force-quit dialog
 // unless we override the app name explicitly. Must be set before
@@ -305,6 +447,7 @@ if (!gotTheLock) {
     // and ignore CommandOrControl + R in production
     app.on('browser-window-created', (_event, window) => {
       optimizer.watchWindowShortcuts(window)
+      installNativeEditContextMenu(window)
     })
 
     bootstrap()

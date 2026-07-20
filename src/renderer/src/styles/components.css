@@ -239,6 +239,7 @@
 
 .sidebar-tree {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 4px 0;
 }
@@ -640,8 +641,13 @@
   user-select: text;
 }
 
+.markdown-editor-wrapper .markdown-editor-surface {
+  min-height: 100%;
+}
+
 .markdown-editor-wrapper .milkdown {
   max-width: 800px;
+  min-height: 100%;
   margin: 0 auto;
   padding: 32px 48px;
   font-family: var(--font-sans);
@@ -759,6 +765,66 @@
   font-weight: 600;
 }
 .markdown-editor-wrapper .milkdown img { max-width: 100%; border-radius: var(--radius-md); }
+
+.markdown-editor-wrapper .milkdown .flux-image-node {
+  display: inline-flex;
+  flex-direction: column;
+  max-width: 100%;
+  margin: 6px 0;
+  vertical-align: top;
+}
+
+.markdown-editor-wrapper .milkdown .flux-image-node img {
+  display: block;
+  max-width: 100%;
+  min-height: 24px;
+}
+
+.markdown-editor-wrapper .milkdown .flux-image-node img[data-flux-asset-loading="true"] {
+  width: 160px;
+  height: 80px;
+  background: var(--bg-tertiary);
+  border: 1px dashed var(--border-color);
+}
+
+.markdown-editor-wrapper .milkdown .flux-image-markdown-source {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  margin-top: 4px;
+  padding: 3px 6px;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  appearance: none;
+  outline: none;
+  cursor: text;
+  user-select: text;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.markdown-editor-wrapper .milkdown .flux-image-markdown-source:focus {
+  border-color: var(--accent-primary);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 16%, transparent);
+}
+
+.markdown-editor-wrapper .milkdown .flux-image-upload-placeholder {
+  display: inline-block;
+  width: 120px;
+  height: 64px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  border: 1px dashed var(--border-color);
+  vertical-align: middle;
+}
 .markdown-editor-wrapper .milkdown hr {
   border: none;
   border-top: 1px solid var(--border-light);

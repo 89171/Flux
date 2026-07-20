@@ -23,7 +23,7 @@ import AboutDialog from './components/AboutDialog'
 import { useFileStore } from './stores/fileStore'
 import { usePluginStore } from './stores/pluginStore'
 import type { NoteFile } from '@shared/types'
-import { Sparkles, Puzzle, X, FileText, Settings, Search } from 'lucide-react'
+import { Sparkles, Puzzle, X, FileText, Settings, Search, Trash2 } from 'lucide-react'
 
 type AppView = 'editor' | 'plugins'
 
@@ -48,13 +48,16 @@ export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
 
   const loadTree = useFileStore((s) => s.loadTree)
+  const loadTrash = useFileStore((s) => s.loadTrash)
   const loadPlugins = usePluginStore((s) => s.loadPlugins)
   const loadFormatMap = usePluginStore((s) => s.loadFormatMap)
   const setFormatMap = usePluginStore((s) => s.setFormatMap)
   const fileTree = useFileStore((s) => s.tree)
+  const [showTrash, setShowTrash] = useState(false)
 
   useEffect(() => {
     loadTree()
+    loadTrash()
     loadPlugins()
     loadFormatMap()
     // Load theme from settings
@@ -326,12 +329,17 @@ export default function App() {
           {/* Activity Bar - Icon-only vertical bar (VSCode style) */}
           <div className="activity-bar">
             <button
-              className={`activity-bar-btn ${view === 'editor' && !aiPanelOpen && !sidebarCollapsed ? 'active' : ''}`}
+              className={`activity-bar-btn ${view === 'editor' && !aiPanelOpen && !sidebarCollapsed && !showTrash ? 'active' : ''}`}
               onClick={() => {
                 if (view !== 'editor') {
                   setView('editor')
                   setAiPanelOpen(false)
                   setSidebarCollapsed(false)
+                  setShowTrash(false)
+                } else if (showTrash) {
+                  setAiPanelOpen(false)
+                  setSidebarCollapsed(false)
+                  setShowTrash(false)
                 } else {
                   setSidebarCollapsed((v) => !v)
                 }
@@ -362,6 +370,19 @@ export default function App() {
               <Search size={20} />
             </button>
             <button
+              className={`activity-bar-btn ${view === 'editor' && !sidebarCollapsed && showTrash ? 'active' : ''}`}
+              onClick={() => {
+                setView('editor')
+                setAiPanelOpen(false)
+                setSidebarCollapsed(false)
+                setShowTrash(true)
+                void loadTrash()
+              }}
+              data-tooltip="Trash"
+            >
+              <Trash2 size={20} />
+            </button>
+            <button
               className="activity-bar-btn"
               onClick={() => setShowSettings(true)}
               data-tooltip="Settings (Cmd+,)"
@@ -375,7 +396,10 @@ export default function App() {
           {!sidebarCollapsed && (
             <div style={{ display: 'flex', height: '100%' }}>
               <div style={{ width: sidebarWidth, height: '100%', flexShrink: 0 }}>
-                <Sidebar onCollapse={() => setSidebarCollapsed(true)} />
+                <Sidebar
+                  showTrash={showTrash}
+                  onCollapse={() => setSidebarCollapsed(true)}
+                />
               </div>
               <div
                 onMouseDown={handleResizeStart}

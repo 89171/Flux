@@ -2,6 +2,10 @@ import { basename } from 'path'
 import type { GitHubStorageConfig, StorageFile } from '@shared/types'
 import type { StorageProvider } from '../StorageProvider'
 
+const GITHUB_REQUEST_TIMEOUT_MS = 30_000
+const GITHUB_MAX_ATTEMPTS = 3
+const GITHUB_RETRY_DELAYS_MS = [800, 2_000]
+
 interface GitHubContentEntry {
   name: string
   path: string
@@ -10,6 +14,14 @@ interface GitHubContentEntry {
   sha?: string
   content?: string
   encoding?: string
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function retryDelay(attempt: number): number {
+  return GITHUB_RETRY_DELAYS_MS[attempt - 1] ?? GITHUB_RETRY_DELAYS_MS[GITHUB_RETRY_DELAYS_MS.length - 1]
 }
 
 export class GitHubProvider implements StorageProvider {
@@ -49,10 +61,10 @@ export class GitHubProvider implements StorageProvider {
     if (Array.isArray(entry) || entry.type !== 'file') {
       throw new Error(`GitHub path is not a file: ${path}`)
     }
-    if (entry.encoding !== 'base64' || !entry.content) {
-      throw new Error(`GitHub content is not base64 encoded: ${path}`)
+    if (entry.encoding === 'base64' && entry.content) {
+      return Buffer.from(entry.content.replace(/\n/g, ''), 'base64')
     }
-    return Buffer.from(entry.content.replace(/\n/g, ''), 'base64')
+    return this.getRawContent(path)
   }
 
   async write(path: string, data: Uint8Array): Promise<void> {
@@ -116,6 +128,18 @@ export class GitHubProvider implements StorageProvider {
     )
   }
 
+  private async getRawContent(path: string): Promise<Uint8Array> {
+    const data = await this.requestBytes(
+      `${this.contentsEndpoint(path)}?ref=${encodeURIComponent(this.config!.branch)}`,
+      {
+        headers: {
+          Accept: 'application/vnd.github.raw+json'
+        }
+      }
+    )
+    return new Uint8Array(data)
+  }
+
   private contentsEndpoint(path: string): string {
     const cfg = this.requireConfig()
     const providerPath = this.withBasePath(path)
@@ -129,6 +153,16 @@ export class GitHubProvider implements StorageProvider {
   }
 
   private async request<T = unknown>(endpoint: string, init: RequestInit = {}): Promise<T> {
+    const response = await this.fetch(endpoint, init)
+    return response.json() as Promise<T>
+  }
+
+  private async requestBytes(endpoint: string, init: RequestInit = {}): Promise<ArrayBuffer> {
+    const response = await this.fetch(endpoint, init)
+    return response.arrayBuffer()
+  }
+
+  private async fetch(endpoint: string, init: RequestInit = {}): Promise<Response> {
     const cfg = this.requireConfig()
     const headers: Record<string, string> = {
       Accept: 'application/vnd.github+json',
@@ -137,17 +171,74 @@ export class GitHubProvider implements StorageProvider {
     }
     if (cfg.token) headers.Authorization = `Bearer ${cfg.token}`
 
-    const response = await fetch(`https://api.github.com${endpoint}`, {
-      ...init,
-      headers: {
-        ...headers,
-        ...(init.headers as Record<string, string> | undefined)
+    let lastError: unknown
+    for (let attempt = 1; attempt <= GITHUB_MAX_ATTEMPTS; attempt++) {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), GITHUB_REQUEST_TIMEOUT_MS)
+      try {
+        const response = await fetch(`https://api.github.com${endpoint}`, {
+          ...init,
+          signal: init.signal ?? controller.signal,
+          headers: {
+            ...headers,
+            ...(init.headers as Record<string, string> | undefined)
+          }
+        })
+
+        clearTimeout(timeout)
+        if (!response.ok) {
+          const body = await response.text()
+          const error = new Error(`GitHub ${response.status}: ${body}`)
+          if (attempt < GITHUB_MAX_ATTEMPTS && this.shouldRetryResponse(response.status)) {
+            lastError = error
+            await delay(retryDelay(attempt))
+            continue
+          }
+          throw error
+        }
+        return response
+      } catch (err) {
+        clearTimeout(timeout)
+        lastError = err
+        if (attempt >= GITHUB_MAX_ATTEMPTS || !this.shouldRetryError(err)) {
+          throw err
+        }
+        await delay(retryDelay(attempt))
       }
-    })
-    if (!response.ok) {
-      throw new Error(`GitHub ${response.status}: ${await response.text()}`)
     }
-    return response.json() as Promise<T>
+
+    throw lastError instanceof Error ? lastError : new Error(String(lastError))
+  }
+
+  private shouldRetryResponse(status: number): boolean {
+    return status === 408 || status === 429 || status >= 500
+  }
+
+  private shouldRetryError(err: unknown): boolean {
+    return this.errorMatches(err, /\b(fetch failed|network|timeout|timedout|abort|aborted|ETIMEDOUT|ECONNRESET|EAI_AGAIN|ENOTFOUND|ECONNREFUSED|socket)\b/i)
+  }
+
+  private errorMatches(err: unknown, pattern: RegExp): boolean {
+    if (!err) return false
+    if (typeof err === 'string') return pattern.test(err)
+
+    if (err instanceof AggregateError) {
+      return err.errors.some((item) => this.errorMatches(item, pattern))
+    }
+
+    if (err instanceof Error) {
+      if (pattern.test(`${err.name} ${err.message}`)) return true
+      return this.errorMatches((err as Error & { cause?: unknown }).cause, pattern)
+    }
+
+    if (typeof err === 'object') {
+      const code = (err as { code?: unknown }).code
+      if (code && pattern.test(String(code))) return true
+      const cause = (err as { cause?: unknown }).cause
+      if (cause) return this.errorMatches(cause, pattern)
+    }
+
+    return pattern.test(String(err))
   }
 
   private withBasePath(path: string): string {

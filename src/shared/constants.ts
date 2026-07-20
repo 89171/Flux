@@ -3,6 +3,8 @@ export const APP_VERSION = '1.0.0'
 export const DEFAULT_WORKSPACE = 'FluxWorkspace'
 export const BUILTIN_PLUGINS_DIR = 'builtin-plugins'
 export const USER_PLUGINS_DIR = 'plugins'
+export const STATIC_ASSETS_ROOT = '.flux-assets'
+export const MARKDOWN_ASSETS_DIR = 'assets'
 
 /**
  * Plugin SDK ABI version. Bump the major when we change the shape of

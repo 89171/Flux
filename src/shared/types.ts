@@ -75,6 +75,26 @@ export interface TrashRestoreResult {
   entry: NoteFile
 }
 
+export interface StaticAssetSaveRequest {
+  ownerPath?: string
+  fileName?: string
+  mimeType?: string
+  data: ArrayBuffer | Uint8Array
+}
+
+export interface StaticAssetSaveResult {
+  path: string
+  name: string
+  size: number
+  mimeType: string
+}
+
+export interface StaticAssetReadResult {
+  path: string
+  mimeType: string
+  dataUrl: string
+}
+
 // ============ Plugin System Types ============
 
 export interface PluginManifest {
@@ -314,6 +334,7 @@ export interface AIMessage {
   content: string
   timestamp: number
   toolEvent?: AIToolEvent
+  hideApplyActions?: boolean
 }
 
 export interface AIConversation {

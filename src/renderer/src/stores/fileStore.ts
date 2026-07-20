@@ -33,6 +33,7 @@ interface FileState {
   openTrashFolder: () => Promise<void>
   renameFile: (oldPath: string, newName: string) => Promise<void>
   moveFile: (sourcePath: string, targetDir: string) => Promise<void>
+  copyFile: (sourcePath: string, targetDir: string) => Promise<void>
   openFolder: () => Promise<void>
 }
 
@@ -307,6 +308,15 @@ export const useFileStore = create<FileState>((set, get) => ({
       await window.flux.file.move(sourcePath, targetDir)
     } catch (err) {
       console.error('Failed to move file:', err)
+      throw err
+    }
+  },
+
+  copyFile: async (sourcePath, targetDir) => {
+    try {
+      await window.flux.file.copy(sourcePath, targetDir)
+    } catch (err) {
+      console.error('Failed to copy file:', err)
       throw err
     }
   },

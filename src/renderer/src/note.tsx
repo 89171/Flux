@@ -318,8 +318,8 @@ function NoteApp() {
         setFontSize(DEFAULT_FONT_SIZE)
       }
     }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
+    window.addEventListener('keydown', handler, true)
+    return () => window.removeEventListener('keydown', handler, true)
   }, [noteData, saveNow])
 
   if (isLoading) {
@@ -371,6 +371,7 @@ function NoteApp() {
             key={noteData.notePath}
             value={content}
             onChange={handleContentChange}
+            filePath={noteData.notePath}
             className="milkdown-editor-wrapper"
           />
         )
