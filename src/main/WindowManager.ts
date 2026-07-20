@@ -102,7 +102,7 @@ export class WindowManager {
     return mainWindow
   }
 
-  openNoteWindow(opts: OpenNoteOptions): BrowserWindow {
+  openNoteWindow(opts: OpenNoteOptions, opener?: BrowserWindow): BrowserWindow {
     const {
       noteId,
       notePath,
@@ -121,6 +121,10 @@ export class WindowManager {
       if (autoCollapse) {
         this.setAutoCollapse(noteId, true)
       }
+      if (opener && this.isWindowFullScreen(opener)) {
+        this.restoreCompactWindow(existing.window)
+        this.attachToFullScreenOpener(existing.window, opener, existing.isPinned)
+      }
       existing.window.show()
       existing.window.focus()
       return existing.window
@@ -129,8 +133,14 @@ export class WindowManager {
     const windowOptions: BrowserWindowConstructorOptions = {
       width: NOTE_WINDOW_DEFAULT_WIDTH,
       height: NOTE_WINDOW_DEFAULT_HEIGHT,
+      center: true,
       frame: false,
       show: false,
+      fullscreen: false,
+      fullscreenable: true,
+      minimizable: true,
+      maximizable: true,
+      resizable: true,
       transparent: isPinned,
       alwaysOnTop: isPinned,
       opacity: opacity,
@@ -147,6 +157,12 @@ export class WindowManager {
     }
 
     const win = new BrowserWindow(windowOptions)
+
+    if (isPinned) {
+      this.setPinnedWindowVisibility(win, true)
+    } else if (opener && this.isWindowFullScreen(opener)) {
+      this.attachToFullScreenOpener(win, opener, false)
+    }
 
     const managed: ManagedWindow = {
       window: win,
@@ -212,13 +228,72 @@ export class WindowManager {
     return win
   }
 
+  private isWindowFullScreen(win: BrowserWindow): boolean {
+    return win.isFullScreen() || (process.platform === 'darwin' && win.isSimpleFullScreen())
+  }
+
+  /** Restore a previously maximized/fullscreen note before presenting it from
+   *  a fullscreen main window. Already-compact windows retain their bounds. */
+  private restoreCompactWindow(win: BrowserWindow): void {
+    const applyDefaultBounds = (): void => {
+      if (win.isDestroyed()) return
+      if (win.isMaximized()) win.unmaximize()
+      win.setSize(NOTE_WINDOW_DEFAULT_WIDTH, NOTE_WINDOW_DEFAULT_HEIGHT)
+      win.center()
+    }
+
+    if (win.isFullScreen()) {
+      win.once('leave-full-screen', applyDefaultBounds)
+      win.setFullScreen(false)
+      return
+    }
+    if (process.platform === 'darwin' && win.isSimpleFullScreen()) {
+      win.setSimpleFullScreen(false)
+      applyDefaultBounds()
+      return
+    }
+    if (win.isMaximized()) applyDefaultBounds()
+  }
+
+  /** A non-pinned child window stays visible above a macOS fullscreen Space.
+   *  Once the opener leaves fullscreen it becomes an independent window again. */
+  private attachToFullScreenOpener(
+    noteWindow: BrowserWindow,
+    opener: BrowserWindow,
+    isPinned: boolean
+  ): void {
+    if (process.platform !== 'darwin' || isPinned || opener.isDestroyed()) return
+    if (noteWindow.getParentWindow() === opener) return
+
+    noteWindow.setParentWindow(opener)
+    const detach = (): void => {
+      if (!noteWindow.isDestroyed() && noteWindow.getParentWindow() === opener) {
+        noteWindow.setParentWindow(null)
+      }
+    }
+    opener.once('leave-full-screen', detach)
+    noteWindow.once('closed', () => opener.removeListener('leave-full-screen', detach))
+  }
+
+  /** Keep pinned notes above every macOS virtual desktop, including native
+   *  fullscreen Spaces. Other platforms retain their existing behavior. */
+  private setPinnedWindowVisibility(win: BrowserWindow, isPinned: boolean): void {
+    win.setAlwaysOnTop(isPinned, isPinned ? 'screen-saver' : 'normal')
+    if (process.platform === 'darwin') {
+      win.setVisibleOnAllWorkspaces(
+        isPinned,
+        isPinned ? { visibleOnFullScreen: true } : undefined
+      )
+    }
+  }
+
   pinNote(noteId: string, opacity: number = 1.0): void {
     const managed = this.noteWindows.get(noteId)
     if (!managed) return
 
     managed.isPinned = true
     managed.opacity = opacity
-    managed.window.setAlwaysOnTop(true, 'screen-saver')
+    this.setPinnedWindowVisibility(managed.window, true)
     managed.window.setOpacity(opacity)
   }
 
@@ -227,7 +302,7 @@ export class WindowManager {
     if (!managed) return
 
     managed.isPinned = false
-    managed.window.setAlwaysOnTop(false)
+    this.setPinnedWindowVisibility(managed.window, false)
     managed.window.setOpacity(1.0)
   }
 

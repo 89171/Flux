@@ -7,7 +7,7 @@
  *
  * Features:
  *  - WYSIWYG Markdown editing (Milkdown)
- *  - Frameless title bar with pin / minimize / close
+ *  - Frameless title bar with pin / minimize / fullscreen / close
  *  - Debounced auto-save
  *  - Consistent styling with main app
  */
@@ -23,7 +23,7 @@ import {
   useRef,
   type CSSProperties
 } from 'react'
-import { Pin, X, Minus } from 'lucide-react'
+import { Pin, X, Minus, Maximize2 } from 'lucide-react'
 import MilkdownEditor from './components/MilkdownEditor'
 import CodeMirrorEditor from './components/CodeMirrorEditor'
 import type { NoteFormat } from '@shared/types'
@@ -295,6 +295,10 @@ function NoteApp() {
     }
   }, [noteData])
 
+  const handleToggleFullscreen = useCallback(() => {
+    void window.flux.window.toggleFullscreen()
+  }, [])
+
   const isMarkdown = noteData?.format === 'markdown'
 
   // Keyboard shortcut: Cmd/Ctrl+S to save immediately, Cmd/Ctrl+/-/0 to zoom
@@ -539,6 +543,23 @@ function NoteApp() {
             }}
           >
             <Minus size={14} />
+          </button>
+          <button
+            style={titlebarBtnStyle}
+            onClick={handleToggleFullscreen}
+            onMouseDown={(e) => e.stopPropagation()}
+            title="Toggle Full Screen"
+            type="button"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--bg-hover)'
+              e.currentTarget.style.color = 'var(--text-primary)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent'
+              e.currentTarget.style.color = 'var(--text-tertiary)'
+            }}
+          >
+            <Maximize2 size={13} />
           </button>
           <button
             style={titlebarBtnStyle}

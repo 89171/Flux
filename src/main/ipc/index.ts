@@ -336,7 +336,7 @@ ${htmlBody}
 
   // ============ Window IPC ============
 
-  ipcMain.handle(IPC.WINDOW_OPEN_NOTE, async (_event, opts: {
+  ipcMain.handle(IPC.WINDOW_OPEN_NOTE, async (event, opts: {
     noteId: string
     notePath: string
     noteName: string
@@ -345,7 +345,7 @@ ${htmlBody}
     opacity?: number
     autoCollapse?: boolean
   }) => {
-    windowManager.openNoteWindow(opts)
+    windowManager.openNoteWindow(opts, BrowserWindow.fromWebContents(event.sender) ?? undefined)
     return true
   })
 
@@ -399,6 +399,18 @@ ${htmlBody}
       BrowserWindow.fromWebContents(event.sender)?.minimize()
     }
     return true
+  })
+
+  ipcMain.handle(IPC.WINDOW_TOGGLE_FULLSCREEN, async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return false
+    const nextState = !win.isFullScreen()
+    // A note opened over a macOS fullscreen main window is temporarily a
+    // child so it can remain in that Space. Detach before giving it its own
+    // fullscreen Space.
+    if (nextState && win.getParentWindow()) win.setParentWindow(null)
+    win.setFullScreen(nextState)
+    return nextState
   })
 
   ipcMain.handle(IPC.WINDOW_AUTO_LAUNCH, async (_event, enabled?: boolean) => {

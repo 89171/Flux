@@ -98,6 +98,7 @@ const api = {
     setAutoCollapse: (noteId: string, enabled: boolean): Promise<boolean> => ipcRenderer.invoke(IPC.WINDOW_SET_AUTO_COLLAPSE, noteId, enabled),
     close: (noteId?: string): Promise<boolean> => ipcRenderer.invoke(IPC.WINDOW_CLOSE, noteId),
     minimize: (noteId?: string): Promise<boolean> => ipcRenderer.invoke(IPC.WINDOW_MINIMIZE, noteId),
+    toggleFullscreen: (): Promise<boolean> => ipcRenderer.invoke(IPC.WINDOW_TOGGLE_FULLSCREEN),
     setAutoLaunch: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke(IPC.WINDOW_AUTO_LAUNCH, enabled),
     minimizeFrame: () => ipcRenderer.send('window:minimize'),
     closeFrame: () => ipcRenderer.send('window:close'),

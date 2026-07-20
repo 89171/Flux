@@ -32,6 +32,7 @@ export const IPC = {
   WINDOW_OPEN_NOTE: 'window:openNote',
   WINDOW_CLOSE: 'window:close',
   WINDOW_MINIMIZE: 'window:minimize',
+  WINDOW_TOGGLE_FULLSCREEN: 'window:toggleFullscreen',
   WINDOW_SET_AUTO_COLLAPSE: 'window:setAutoCollapse',
   WINDOW_AUTO_LAUNCH: 'window:autoLaunch',
   PLUGIN_LIST: 'plugin:list',

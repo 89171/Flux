@@ -1105,8 +1105,8 @@ export default function Editor(): JSX.Element {
               padding: '6px',
               border: 'none',
               borderRadius: '6px',
-              background: isPinned ? 'var(--accent-primary)' : 'none',
-              color: isPinned ? 'var(--bg-primary)' : 'var(--text-secondary)',
+              background: 'none',
+              color: 'var(--text-secondary)',
               cursor: 'pointer'
             }}
           >

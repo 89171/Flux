@@ -3,11 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Flux — 插件化桌面笔记</title>
-  <meta name="description" content="Flux 是一款插件驱动的桌面笔记应用，支持窗口置顶、AI 智能生成、多种笔记格式。" />
+  <title>Flux — 本地优先的多格式 AI 笔记工作台</title>
+  <meta name="description" content="Flux 是一款本地优先的多格式桌面工作台，内置 11 种编辑器，支持桌面置顶、AI 协作、全文搜索、历史版本与多种存储后端。" />
+  <meta name="theme-color" content="#ffffff" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -37,6 +38,7 @@
     }
 
     a { color: inherit; text-decoration: none; }
+    a:focus-visible, input:focus-visible { outline: 2px solid var(--black); outline-offset: 3px; }
     img { max-width: 100%; display: block; }
 
     .container { max-width: var(--max-width); margin: 0 auto; padding: 0 40px; }
@@ -122,6 +124,7 @@
     }
     .btn-secondary:hover { border-color: var(--gray-300); background: var(--gray-50); }
     .btn-secondary svg { width: 18px; height: 18px; }
+    .hero-meta { margin-top: 18px; font-size: 12px; color: var(--gray-400); }
 
     /* ============ Screenshot ============ */
     .screenshot {
@@ -175,6 +178,32 @@
     .mock-line:nth-child(6) { width: 95%; }
     .mock-line:nth-child(7) { width: 78%; }
 
+    /* ============ Formats ============ */
+    .formats { padding: 0 0 120px; }
+    .formats-header {
+      display: flex; align-items: flex-end; justify-content: space-between;
+      gap: 48px; margin-bottom: 36px;
+    }
+    .formats-header .section-title { max-width: 650px; margin-bottom: 0; }
+    .formats-description { max-width: 430px; color: var(--gray-400); font-size: 15px; line-height: 1.8; }
+    .format-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      gap: 1px; overflow: hidden;
+      border: 1px solid var(--gray-200); border-radius: 14px;
+      background: var(--gray-200);
+    }
+    .format-item { min-height: 144px; padding: 24px; background: var(--white); transition: background 0.2s; }
+    .format-item:hover { background: var(--gray-50); }
+    .format-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+    .format-mark {
+      width: 36px; height: 36px; display: grid; place-items: center;
+      border-radius: 9px; background: var(--black); color: var(--white);
+      font-size: 11px; font-weight: 700; letter-spacing: -0.02em;
+    }
+    .format-ext { font: 11px 'SF Mono', Menlo, monospace; color: var(--gray-400); }
+    .format-name { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+    .format-desc { font-size: 12px; line-height: 1.6; color: var(--gray-400); }
+
     /* ============ Features ============ */
     .features { padding: 120px 0; }
     .section-label {
@@ -209,6 +238,7 @@
     .feature-icon svg { width: 22px; height: 22px; color: var(--black); }
     .feature-card h3 { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
     .feature-card p { font-size: 14px; color: var(--gray-400); line-height: 1.7; }
+    .feature-meta { margin-top: 16px; font-size: 11px; line-height: 1.5; color: var(--gray-300); }
 
     /* ============ Plugin Section ============ */
     .plugin-section { padding: 120px 0; background: var(--gray-50); }
@@ -273,6 +303,12 @@
       background: var(--black); color: var(--white);
       letter-spacing: 0.5px;
     }
+    .pin-demo-actions { display: flex; gap: 6px; margin-left: auto; margin-right: 10px; }
+    .pin-demo-action {
+      width: 18px; height: 18px; display: grid; place-items: center;
+      border: 1px solid var(--gray-200); border-radius: 5px;
+      background: var(--white); color: var(--gray-400); font-size: 9px;
+    }
     .pin-demo-content { font-size: 13px; color: var(--gray-500); line-height: 1.6; }
     .pin-demo-content .line { height: 6px; background: var(--gray-200); border-radius: 3px; margin-bottom: 6px; }
     .pin-demo-content .line:nth-child(1) { width: 70%; }
@@ -331,10 +367,27 @@
     }
     .ai-chat-input span { flex: 1; font-size: 13px; color: var(--gray-500); }
 
-    /* ============ CTA ============ */
-    .cta { padding: 120px 0; text-align: center; }
+    /* ============ Download ============ */
+    .cta { padding: 120px 0; }
+    .download-card {
+      display: grid; grid-template-columns: 1.25fr 0.75fr; align-items: center;
+      gap: 64px; padding: 56px;
+      border: 1px solid var(--gray-200); border-radius: 18px;
+      background: linear-gradient(145deg, var(--white), var(--gray-50));
+    }
+    .download-card .section-label { margin-bottom: 14px; }
     .cta h2 { font-size: 40px; font-weight: 800; letter-spacing: -1px; margin-bottom: 16px; }
-    .cta p { font-size: 18px; color: var(--gray-400); margin-bottom: 40px; }
+    .cta p { font-size: 16px; line-height: 1.8; color: var(--gray-400); margin-bottom: 28px; }
+    .cta-actions { display: flex; gap: 12px; }
+    .platform-list { display: grid; gap: 10px; }
+    .platform-item {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 14px 16px; border: 1px solid var(--gray-200);
+      border-radius: 10px; background: rgba(255,255,255,0.8);
+    }
+    .platform-name { font-size: 13px; font-weight: 600; }
+    .platform-arch { font-size: 11px; color: var(--gray-400); }
+    .release-note { margin-top: 12px; font-size: 11px; line-height: 1.6; color: var(--gray-400); }
 
     /* ============ Footer ============ */
     footer {
@@ -352,9 +405,11 @@
     /* ============ Responsive ============ */
     @media (max-width: 1024px) {
       .hero h1 { font-size: 48px; }
+      .format-grid { grid-template-columns: repeat(3, 1fr); }
       .features-grid { grid-template-columns: repeat(2, 1fr); }
       .plugin-layout, .pin-layout, .ai-layout { grid-template-columns: 1fr; gap: 48px; }
       .plugin-layout .plugin-visual { order: -1; }
+      .download-card { grid-template-columns: 1fr; gap: 40px; }
     }
     @media (max-width: 640px) {
       .container { padding: 0 20px; }
@@ -363,30 +418,40 @@
       .hero p { font-size: 17px; }
       .hero-actions { flex-direction: column; align-items: center; }
       .nav-links { display: none; }
+      .formats-header { display: block; }
+      .formats-header .section-title { margin-bottom: 18px; }
+      .format-grid { grid-template-columns: 1fr; }
+      .format-item { min-height: auto; }
       .features-grid { grid-template-columns: 1fr; }
       .section-title { font-size: 30px; }
       .screenshot-mock { flex-direction: column; }
       .mock-sidebar { width: 100%; height: auto; border-right: none; border-bottom: 1px solid var(--gray-200); }
+      .download-card { padding: 32px 24px; }
+      .cta-actions { flex-direction: column; }
+      .cta-actions a { justify-content: center; }
+      .footer-inner { flex-direction: column; align-items: flex-start; gap: 18px; }
+      .footer-links { flex-wrap: wrap; }
     }
   </style>
 </head>
-<body>
+<body id="top">
 
   <!-- Nav -->
   <nav>
     <div class="container">
-      <a href="#" class="nav-logo">
+      <a href="#top" class="nav-logo" aria-label="返回 Flux 官网顶部">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
         Flux
       </a>
       <div class="nav-links">
+        <a href="#formats">格式</a>
         <a href="#features">功能</a>
         <a href="#plugins">插件</a>
         <a href="#ai">AI</a>
       </div>
-      <a href="#" class="nav-cta">
+      <a href="https://github.com/89171/Flux/releases" class="nav-cta" target="_blank" rel="noopener noreferrer" aria-label="前往 GitHub Releases 下载 Flux">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        下载
+        下载 v1.0.4
       </a>
     </div>
   </nav>
@@ -396,20 +461,21 @@
     <div class="container">
       <div class="hero-badge">
         <span class="dot"></span>
-        开源 · 跨平台 · 插件化
+        v1.0.4 · 开源 · 跨平台
       </div>
       <h1>你的笔记，<br /><em>不被格式定义</em></h1>
-      <p>插件驱动的桌面笔记应用。Markdown、思维导图、Drawio — 任何格式，一个窗口。支持桌面置顶、AI 智能生成。</p>
+      <p>本地优先的多格式桌面工作台。把文档、图表、白板、流程和任务放进同一个工作区，再用 AI 与悬浮窗口让信息随手可用。</p>
       <div class="hero-actions">
-        <a href="#" class="btn-primary">
+        <a href="https://github.com/89171/Flux/releases" class="btn-primary" target="_blank" rel="noopener noreferrer">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          免费下载
+          免费下载 v1.0.4
         </a>
-        <a href="#features" class="btn-secondary">
+        <a href="#formats" class="btn-secondary">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
-          了解更多
+          浏览支持格式
         </a>
       </div>
+      <div class="hero-meta">支持 macOS、Windows 与 Linux · 安装包托管于 GitHub Releases</div>
     </div>
   </section>
 
@@ -445,59 +511,162 @@
     </div>
   </section>
 
+  <!-- Formats -->
+  <section class="formats" id="formats">
+    <div class="container">
+      <div class="formats-header">
+        <div>
+          <div class="section-label">内置格式</div>
+          <h2 class="section-title">一个工作区，承载 11 种表达方式</h2>
+        </div>
+        <p class="formats-description">从快速记录到流程建模，Flux 会根据文件类型加载对应编辑器；部分专业格式可在插件市场中按需启用。</p>
+      </div>
+      <div class="format-grid">
+        <div class="format-item">
+          <div class="format-top"><span class="format-mark">MD</span><span class="format-ext">.md</span></div>
+          <div class="format-name">Markdown</div>
+          <div class="format-desc">所见即所得编辑与 GFM 语法支持</div>
+        </div>
+        <div class="format-item">
+          <div class="format-top"><span class="format-mark">TXT</span><span class="format-ext">.txt</span></div>
+          <div class="format-name">纯文本</div>
+          <div class="format-desc">零负担记录代码、日志和临时内容</div>
+        </div>
+        <div class="format-item">
+          <div class="format-top"><span class="format-mark">MAP</span><span class="format-ext">.mm</span></div>
+          <div class="format-name">思维导图</div>
+          <div class="format-desc">可视化梳理层级，双击空白画布即可放大</div>
+        </div>
+        <div class="format-item">
+          <div class="format-top"><span class="format-mark">DIO</span><span class="format-ext">.drawio</span></div>
+          <div class="format-name">Draw.io</div>
+          <div class="format-desc">绘制架构图、网络图与业务图表</div>
+        </div>
+        <div class="format-item">
+          <div class="format-top"><span class="format-mark">WB</span><span class="format-ext">.tldr</span></div>
+          <div class="format-name">Whiteboard</div>
+          <div class="format-desc">自由画布上的草图、便签与协作构思</div>
+        </div>
+        <div class="format-item">
+          <div class="format-top"><span class="format-mark">EX</span><span class="format-ext">.excalidraw</span></div>
+          <div class="format-name">Excalidraw</div>
+          <div class="format-desc">手绘风格的图解、线框和演示草图</div>
+        </div>
+        <div class="format-item">
+          <div class="format-top"><span class="format-mark">KB</span><span class="format-ext">.todo</span></div>
+          <div class="format-name">Kanban</div>
+          <div class="format-desc">用看板管理任务状态与工作流</div>
+        </div>
+        <div class="format-item">
+          <div class="format-top"><span class="format-mark">MR</span><span class="format-ext">.mmd</span></div>
+          <div class="format-name">Mermaid</div>
+          <div class="format-desc">实时预览，双指缩放不受 300% 上限限制，并支持双击放大</div>
+        </div>
+        <div class="format-item">
+          <div class="format-top"><span class="format-mark">PU</span><span class="format-ext">.puml</span></div>
+          <div class="format-name">PlantUML</div>
+          <div class="format-desc">面向工程文档的文本化 UML 图表</div>
+        </div>
+        <div class="format-item">
+          <div class="format-top"><span class="format-mark">BP</span><span class="format-ext">.bpmn</span></div>
+          <div class="format-name">BPMN</div>
+          <div class="format-desc">建模、查看并导出标准业务流程</div>
+        </div>
+        <div class="format-item">
+          <div class="format-top"><span class="format-mark">DM</span><span class="format-ext">.dmn</span></div>
+          <div class="format-name">DMN</div>
+          <div class="format-desc">用决策表表达和维护业务规则</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- Features -->
   <section class="features" id="features">
     <div class="container">
       <div class="section-label">核心功能</div>
-      <h2 class="section-title">为高效笔记而生</h2>
+      <h2 class="section-title">从记录，到整理，再到交付</h2>
       <div class="features-grid">
 
         <div class="feature-card">
           <div class="feature-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
           </div>
-          <h3>插件化格式系统</h3>
-          <p>引擎与格式完全解耦。Markdown、思维导图、Drawio、任意格式 — 通过安装插件扩展，无需修改核心代码。</p>
+          <h3>11 种内置编辑器</h3>
+          <p>文档、思维导图、白板、看板和流程建模都在同一个应用中完成，并可继续通过插件扩展。</p>
+          <div class="feature-meta">Markdown · Draw.io · Mermaid · BPMN · DMN 等</div>
         </div>
 
         <div class="feature-card">
           <div class="feature-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
           </div>
-          <h3>桌面置顶</h3>
-          <p>任何笔记窗口一键 Pin 到桌面最顶层。自定义透明度、贴边自动收起、多窗口同时置顶。</p>
+          <h3>跨空间桌面置顶</h3>
+          <p>任何笔记都能一键变成独立小窗，支持透明度、贴边收起，并可在 macOS 的虚拟桌面和全屏空间持续可见。</p>
+          <div class="feature-meta">小窗内置缩小、全屏与关闭控制</div>
         </div>
 
         <div class="feature-card">
           <div class="feature-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 2 13 2"/><line x1="12" y1="14" x2="12" y2="14"/></svg>
           </div>
-          <h3>AI 智能生成</h3>
-          <p>自然语言生成笔记内容，自动匹配当前格式。上传文件、图片、语音自动转为结构化笔记。</p>
+          <h3>上下文感知 AI</h3>
+          <p>以流式对话修改当前内容或创建新文件，自动适配目标格式，并支持文件、图片与音频附件。</p>
+          <div class="feature-meta">多服务商配置 · 工具调用 · 音频转写</div>
         </div>
 
         <div class="feature-card">
           <div class="feature-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
           </div>
-          <h3>文件管理</h3>
-          <p>VSCode 风格文件树。新建文档与目录、拖拽排序、右键菜单。拖拽外部文件自动在新窗口打开。</p>
+          <h3>本地文件工作区</h3>
+          <p>用熟悉的树形目录管理真实文件，支持新建、重命名、移动、复制、拖拽与右键操作。</p>
+          <div class="feature-meta">数据保留在你选择的工作区中</div>
         </div>
 
         <div class="feature-card">
           <div class="feature-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
           </div>
-          <h3>多窗口独立</h3>
-          <p>每个笔记可独立打开为新窗口，自由拖拽到任意显示器。窗口间完全独立，互不干扰。</p>
+          <h3>全局内容搜索</h3>
+          <p>跨工作区搜索文件名与正文内容，快速定位匹配结果并直接跳转到目标文档。</p>
+          <div class="feature-meta">不必记住内容保存在哪个目录</div>
         </div>
 
         <div class="feature-card">
           <div class="feature-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
           </div>
-          <h3>所见即所得</h3>
-          <p>内置 Milkdown WYSIWYG 编辑器。实时渲染 Markdown，编辑即预览，支持 GFM 语法。</p>
+          <h3>历史版本与回收站</h3>
+          <p>查看文档修改历史，恢复需要的版本；误删文件可先进入回收站，再决定恢复或永久清理。</p>
+          <div class="feature-meta">降低编辑和文件整理时的误操作成本</div>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </div>
+          <h3>独立窗口与多种导出</h3>
+          <p>文档可在独立窗口或其他显示器中打开，并按格式导出源码、PDF、HTML、PNG 或 SVG。</p>
+          <div class="feature-meta">不同编辑器会提供适合自身内容的导出选项</div>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          </div>
+          <h3>可配置存储后端</h3>
+          <p>除本地工作区外，还可配置 GitHub、WebDAV、FTP / FTPS 和 S3 兼容对象存储。</p>
+          <div class="feature-meta">S3 兼容 MinIO、Cloudflare R2 与 Backblaze B2</div>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          </div>
+          <h3>集中设置与主题</h3>
+          <p>在统一设置面板中管理工作区、AI、存储与插件，并按环境切换亮色或暗色外观。</p>
+          <div class="feature-meta">把工具调整成适合自己的工作方式</div>
         </div>
 
       </div>
@@ -512,46 +681,43 @@
       <div class="plugin-layout">
         <div class="plugin-visual">
           <div class="plugin-code">
-            <span class="cmt">// 定义插件</span><br/>
-            <span class="kw">import</span> { definePlugin } <span class="kw">from</span> <span class="str">'flux-plugin-sdk'</span><br/><br/>
-            <span class="kw">export default</span> <span class="fn">definePlugin</span>({<br/>
-            &nbsp;&nbsp;<span class="fn">manifest</span>: {<br/>
-            &nbsp;&nbsp;&nbsp;&nbsp;id: <span class="str">'mindmap'</span>,<br/>
-            &nbsp;&nbsp;&nbsp;&nbsp;name: <span class="str">'Mind Map'</span>,<br/>
-            &nbsp;&nbsp;&nbsp;&nbsp;type: <span class="str">'format'</span>,<br/>
-            &nbsp;&nbsp;&nbsp;&nbsp;extensions: [<span class="str">'.mm'</span>]<br/>
-            &nbsp;&nbsp;},<br/><br/>
+            <span class="cmt">// manifest.json</span><br/>
+            {<br/>
+            &nbsp;&nbsp;<span class="fn">"id"</span>: <span class="str">"json-editor"</span>,<br/>
+            &nbsp;&nbsp;<span class="fn">"type"</span>: <span class="str">"format"</span>,<br/>
+            &nbsp;&nbsp;<span class="fn">"extensions"</span>: [<span class="str">"json"</span>],<br/>
+            &nbsp;&nbsp;<span class="fn">"editor"</span>: { <span class="fn">"entry"</span>: <span class="str">"renderer/index.html"</span> },<br/>
+            &nbsp;&nbsp;<span class="fn">"main"</span>: <span class="str">"main.js"</span>,<br/>
+            &nbsp;&nbsp;<span class="fn">"permissions"</span>: []<br/>
+            }<br/><br/>
+            <span class="cmt">// main.js</span><br/>
+            module.exports = {<br/>
             &nbsp;&nbsp;<span class="fn">onActivate</span>(ctx) {<br/>
-            &nbsp;&nbsp;&nbsp;&nbsp;ctx.logger.<span class="fn">info</span>(<span class="str">'Ready!'</span>)<br/>
-            &nbsp;&nbsp;},<br/><br/>
-            &nbsp;&nbsp;format: {<br/>
-            &nbsp;&nbsp;&nbsp;&nbsp;<span class="fn">render</span>(content) { <span class="cmt">/* ... */</span> },<br/>
-            &nbsp;&nbsp;&nbsp;&nbsp;<span class="fn">getDefaultContent</span>() {<br/>
-            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="kw">return</span> <span class="str">'# Central Topic\n'</span><br/>
-            &nbsp;&nbsp;&nbsp;&nbsp;}<br/>
-            &nbsp;&nbsp;}<br/>
-            })
+            &nbsp;&nbsp;&nbsp;&nbsp;ctx.logger.<span class="fn">info</span>(<span class="str">"Ready"</span>)<br/>
+            &nbsp;&nbsp;},<br/>
+            &nbsp;&nbsp;<span class="fn">onDeactivate</span>(ctx) { <span class="cmt">/* cleanup */</span> }<br/>
+            }
           </div>
         </div>
         <div class="plugin-desc">
-          <h3>标准 SDK，无限扩展</h3>
-          <p>Flux 提供完整的插件 SDK，定义了清晰的生命周期、格式接口和 AI 适配器。第三方开发者可以在几分钟内创建自己的笔记格式插件。</p>
+          <h3>开放的不只是文件格式</h3>
+          <p>Flux 的插件系统包含清晰的清单、生命周期、编辑器协议和权限声明。开发者可以让新的文件类型直接拥有自己的编辑界面。</p>
           <ul>
             <li>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              <span>完整的生命周期管理：安装、激活、停用、卸载</span>
+              <span>完整生命周期：安装、激活、停用与卸载</span>
             </li>
             <li>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              <span>格式适配器：每种格式定义自己的渲染和编辑逻辑</span>
+              <span>沙箱化编辑器：通过安全的消息协议读写内容</span>
             </li>
             <li>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              <span>AI 集成：插件可定义专属 AI prompt 模板</span>
+              <span>权限控制：文件系统、网络等能力按需声明</span>
             </li>
             <li>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              <span>插件商城：可视化安装、启用、卸载插件</span>
+              <span>插件市场：支持本地加载、启用、停用和卸载</span>
             </li>
           </ul>
         </div>
@@ -563,17 +729,22 @@
   <section class="pin-section" id="pin">
     <div class="container">
       <div class="section-label">桌面置顶</div>
-      <h2 class="section-title">笔记浮在桌面之上</h2>
+      <h2 class="section-title">让关键信息一直在眼前</h2>
       <div class="pin-layout">
         <div class="pin-desc">
-          <h3>工作时的最佳伴侣</h3>
-          <p>将笔记窗口置顶到所有应用窗口之上。无论你切换到任何程序，笔记内容始终可见。适合做会议笔记、API 文档、待办清单等场景。</p>
-          <p>支持自定义透明度，让笔记半透明浮在其他应用之上，不会遮挡全部视线。还支持贴边自动收起——窗口拖到屏幕边缘自动折叠为细条，鼠标移入立即展开。</p>
+          <h3>独立小窗，跨空间持续可见</h3>
+          <p>从全屏工作区点击置顶或外部打开，笔记也会进入带缩小、全屏和关闭控制的独立小窗。适合会议记录、参考资料、待办清单和演示提词。</p>
+          <p>在 macOS 上，小窗可跨虚拟桌面与全屏空间保持置顶。还可调节透明度或启用贴边自动收起，在随时可见与不打扰之间取得平衡。</p>
         </div>
         <div class="pin-visual">
           <div class="pin-demo">
             <div class="pin-demo-titlebar">
               <span class="pin-demo-title">Meeting Notes.md</span>
+              <span class="pin-demo-actions" aria-hidden="true">
+                <span class="pin-demo-action">—</span>
+                <span class="pin-demo-action">□</span>
+                <span class="pin-demo-action">×</span>
+              </span>
               <span class="pin-demo-badge">PINNED</span>
             </div>
             <div class="pin-demo-content">
@@ -584,7 +755,7 @@
             </div>
             <div class="pin-slider">
               <span>透明度</span>
-              <input type="range" min="30" max="100" value="85" />
+              <input type="range" min="30" max="100" value="85" aria-label="置顶窗口透明度演示" />
               <span>85%</span>
             </div>
           </div>
@@ -597,12 +768,12 @@
   <section class="ai-section" id="ai">
     <div class="container">
       <div class="section-label">AI 集成</div>
-      <h2 class="section-title">用自然语言，创建笔记</h2>
+      <h2 class="section-title">让 AI 理解当前内容与格式</h2>
       <div class="ai-layout">
         <div class="ai-desc">
-          <h3>描述想法，AI 负责实现</h3>
-          <p>输入"创建一份项目周报模板"，AI 自动生成结构化的 Markdown 内容。如果你正在使用思维导图格式，AI 会自动输出层级结构。</p>
-          <p>支持多轮对话修改——"把第三部分拆分成三个子条目"，"添加一个负责人列"——AI 基于上下文持续优化笔记内容。</p>
+          <h3>从对话直接变成可编辑文件</h3>
+          <p>为不同 AI 服务配置模型，通过流式对话修改当前文档，或创建指定格式的新文件。格式适配器会帮助模型输出编辑器能够直接使用的内容。</p>
+          <p>拖入文件、图片或音频作为上下文；音频可先转写，再整理成会议纪要、思维导图、看板任务或结构化文档。</p>
         </div>
         <div class="ai-visual">
           <div class="ai-chat-bubble ai-chat-user">帮我创建一份项目架构文档，包含技术栈选型和模块划分</div>
@@ -626,27 +797,40 @@
 - API 接口设计</div>
           <div class="ai-chat-input">
             <svg style="width:16px;height:16px;color:rgba(255,255,255,0.3)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-            <span>继续优化，添加部署方案...</span>
+            <span>继续优化，另存为 Mermaid 架构图...</span>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- CTA -->
-  <section class="cta">
+  <!-- Download -->
+  <section class="cta" id="download">
     <div class="container">
-      <h2>开始使用 Flux</h2>
-      <p>免费、开源、跨平台。让你的笔记工具，跟上你的思维。</p>
-      <div class="hero-actions">
-        <a href="#" class="btn-primary">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          下载 v1.0.0
-        </a>
-        <a href="#" class="btn-secondary">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6c-1-3.5-4-5-7-5s-6 1.5-7 5m14-4c0 1-1 1-1 1H5c0 0-1 0-1-1m14-4c0-1-1-1-1-1H5c0 0-1 0-1 1"/><path d="M12 2v20"/></svg>
-          GitHub
-        </a>
+      <div class="download-card">
+        <div class="download-copy">
+          <div class="section-label">立即下载</div>
+          <h2>开始使用 Flux v1.0.4</h2>
+          <p>免费、开源、跨平台。前往 GitHub Releases 获取适合你系统的安装包，并查看每个版本的更新说明。</p>
+          <div class="cta-actions">
+            <a href="https://github.com/89171/Flux/releases" class="btn-primary" target="_blank" rel="noopener noreferrer">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              打开下载页
+            </a>
+            <a href="https://github.com/89171/Flux" class="btn-secondary" target="_blank" rel="noopener noreferrer">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6c-1-3.5-4-5-7-5s-6 1.5-7 5m14-4c0 1-1 1-1 1H5c0 0-1 0-1-1m14-4c0-1-1-1-1-1H5c0 0-1 0-1 1"/><path d="M12 2v20"/></svg>
+              查看源代码
+            </a>
+          </div>
+        </div>
+        <div>
+          <div class="platform-list" aria-label="支持的平台">
+            <div class="platform-item"><span class="platform-name">macOS</span><span class="platform-arch">Apple Silicon</span></div>
+            <div class="platform-item"><span class="platform-name">Windows</span><span class="platform-arch">64 位</span></div>
+            <div class="platform-item"><span class="platform-name">Linux</span><span class="platform-arch">64 位</span></div>
+          </div>
+          <div class="release-note">安装包、校验信息与版本说明统一发布在 GitHub Releases；预览构建会标记为 Pre-release。</div>
+        </div>
       </div>
     </div>
   </section>
@@ -655,12 +839,12 @@
   <footer>
     <div class="container">
       <div class="footer-inner">
-        <div class="footer-copy">© 2024 Flux. Open Source.</div>
+        <div class="footer-copy">© 2026 Flux. Open Source.</div>
         <div class="footer-links">
-          <a href="#">文档</a>
-          <a href="#">插件市场</a>
-          <a href="#">GitHub</a>
-          <a href="#">反馈</a>
+          <a href="https://github.com/89171/Flux#readme" target="_blank" rel="noopener noreferrer">文档</a>
+          <a href="#plugins">插件系统</a>
+          <a href="https://github.com/89171/Flux" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href="https://github.com/89171/Flux/issues" target="_blank" rel="noopener noreferrer">反馈</a>
         </div>
       </div>
     </div>
