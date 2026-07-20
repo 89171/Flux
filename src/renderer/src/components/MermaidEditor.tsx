@@ -65,11 +65,17 @@ function ensureInit(theme: MermaidTheme): void {
 }
 
 const PREVIEW_ZOOM_MIN = 0.25
-const PREVIEW_ZOOM_MAX = 3
 const PREVIEW_ZOOM_STEP = 0.25
+const TRACKPAD_ZOOM_SENSITIVITY = 0.01
 
 function clampPreviewZoom(value: number): number {
-  return Math.min(PREVIEW_ZOOM_MAX, Math.max(PREVIEW_ZOOM_MIN, value))
+  return Math.max(PREVIEW_ZOOM_MIN, value)
+}
+
+function touchDistance(touches: TouchList): number {
+  const x = touches[0].clientX - touches[1].clientX
+  const y = touches[0].clientY - touches[1].clientY
+  return Math.hypot(x, y)
 }
 
 export function MermaidEditor({
@@ -83,6 +89,9 @@ export function MermaidEditor({
   const [isExporting, setIsExporting] = useState(false)
   const [viewMode, setViewMode] = useState<'both' | 'editor' | 'preview'>('both')
   const [previewZoom, setPreviewZoom] = useState(1)
+  const previewZoomRef = useRef(1)
+  const previewPaneRef = useRef<HTMLDivElement>(null)
+  const pinchRef = useRef<{ distance: number; zoom: number } | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
@@ -96,6 +105,70 @@ export function MermaidEditor({
   const renderCounterRef = useRef(0)
 
   const theme: MermaidTheme = isDarkTheme() ? 'dark' : 'default'
+
+  const updatePreviewZoom = useCallback((nextZoom: number) => {
+    const clampedZoom = clampPreviewZoom(nextZoom)
+    previewZoomRef.current = clampedZoom
+    setPreviewZoom(clampedZoom)
+  }, [])
+
+  // Chromium exposes trackpad pinch gestures as ctrl+wheel events. Use the
+  // wheel delta as a continuous scale factor instead of stepping by 25%, and
+  // register natively so preventDefault can suppress page-level zoom.
+  useEffect(() => {
+    const pane = previewPaneRef.current
+    if (!pane || viewMode === 'editor') return
+
+    const handleWheel = (event: WheelEvent): void => {
+      if (!event.ctrlKey && !event.metaKey) return
+      event.preventDefault()
+      event.stopPropagation()
+      // Bound a single event (not the total zoom) so unusual mouse-wheel
+      // deltas cannot jump to an unusable or non-finite scale.
+      const factor = Math.min(
+        2,
+        Math.max(0.5, Math.exp(-event.deltaY * TRACKPAD_ZOOM_SENSITIVITY))
+      )
+      updatePreviewZoom(previewZoomRef.current * factor)
+    }
+
+    const handleTouchStart = (event: TouchEvent): void => {
+      if (event.touches.length !== 2) return
+      event.preventDefault()
+      pinchRef.current = {
+        distance: touchDistance(event.touches),
+        zoom: previewZoomRef.current
+      }
+    }
+
+    const handleTouchMove = (event: TouchEvent): void => {
+      const pinch = pinchRef.current
+      if (!pinch || event.touches.length !== 2) return
+      event.preventDefault()
+      const distance = touchDistance(event.touches)
+      if (pinch.distance > 0) {
+        updatePreviewZoom(pinch.zoom * distance / pinch.distance)
+      }
+    }
+
+    const handleTouchEnd = (event: TouchEvent): void => {
+      if (event.touches.length < 2) pinchRef.current = null
+    }
+
+    pane.addEventListener('wheel', handleWheel, { passive: false })
+    pane.addEventListener('touchstart', handleTouchStart, { passive: false })
+    pane.addEventListener('touchmove', handleTouchMove, { passive: false })
+    pane.addEventListener('touchend', handleTouchEnd)
+    pane.addEventListener('touchcancel', handleTouchEnd)
+    return () => {
+      pane.removeEventListener('wheel', handleWheel)
+      pane.removeEventListener('touchstart', handleTouchStart)
+      pane.removeEventListener('touchmove', handleTouchMove)
+      pane.removeEventListener('touchend', handleTouchEnd)
+      pane.removeEventListener('touchcancel', handleTouchEnd)
+      pinchRef.current = null
+    }
+  }, [updatePreviewZoom, viewMode])
 
   // Keep mermaid's theme in sync with the app theme. Re-render the
   // current source after a theme switch so colors update live.
@@ -272,7 +345,7 @@ export function MermaidEditor({
         {viewMode !== 'editor' && (
           <>
             <button
-              onClick={() => setPreviewZoom((zoom) => clampPreviewZoom(zoom - PREVIEW_ZOOM_STEP))}
+              onClick={() => updatePreviewZoom(previewZoomRef.current - PREVIEW_ZOOM_STEP)}
               disabled={previewZoom <= PREVIEW_ZOOM_MIN}
               title="缩小预览"
               style={toolbarBtnStyle}
@@ -280,7 +353,7 @@ export function MermaidEditor({
               <ZoomOut size={13} />
             </button>
             <button
-              onClick={() => setPreviewZoom(1)}
+              onClick={() => updatePreviewZoom(1)}
               title="重置缩放"
               style={toolbarBtnStyle}
             >
@@ -288,8 +361,7 @@ export function MermaidEditor({
               <span>{Math.round(previewZoom * 100)}%</span>
             </button>
             <button
-              onClick={() => setPreviewZoom((zoom) => clampPreviewZoom(zoom + PREVIEW_ZOOM_STEP))}
-              disabled={previewZoom >= PREVIEW_ZOOM_MAX}
+              onClick={() => updatePreviewZoom(previewZoomRef.current + PREVIEW_ZOOM_STEP)}
               title="放大预览"
               style={toolbarBtnStyle}
             >
@@ -340,19 +412,18 @@ export function MermaidEditor({
         )}
         {viewMode !== 'editor' && (
           <div
-            onWheel={(e) => {
-              if (!e.metaKey && !e.ctrlKey) return
-              e.preventDefault()
-              setPreviewZoom((zoom) =>
-                clampPreviewZoom(zoom + (e.deltaY > 0 ? -PREVIEW_ZOOM_STEP : PREVIEW_ZOOM_STEP))
-              )
+            ref={previewPaneRef}
+            onDoubleClick={(event) => {
+              event.preventDefault()
+              updatePreviewZoom(previewZoomRef.current + PREVIEW_ZOOM_STEP)
             }}
             style={{
               flex: 1,
               minWidth: 200,
               height: '100%',
               overflow: 'auto',
-              background: 'var(--bg-secondary)'
+              background: 'var(--bg-secondary)',
+              touchAction: 'pan-x pan-y'
             }}
           >
             {previewNode}

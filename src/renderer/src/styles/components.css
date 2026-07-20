@@ -458,6 +458,35 @@
 
 /* ============ AI Panel ============ */
 .ai-panel { display: flex; flex-direction: column; height: 100%; padding: 12px; gap: 10px; }
+.ai-panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+.ai-history-dropdown {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 41;
+  width: 260px; max-height: 320px; overflow-y: auto;
+  background: var(--bg-tertiary); border: 1px solid var(--border-color);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-lg); padding: 4px;
+}
+.ai-history-empty {
+  padding: 12px; text-align: center;
+  font-size: var(--font-size-xs); color: var(--text-tertiary);
+}
+.ai-history-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 8px; border-radius: var(--radius-sm); cursor: pointer;
+  color: var(--text-primary);
+}
+.ai-history-item:hover { background: var(--bg-hover); }
+.ai-history-item.active { background: var(--bg-active); }
+.ai-history-title {
+  flex: 1; font-size: var(--font-size-xs); line-height: 1.4;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ai-history-delete { flex-shrink: 0; opacity: 0; color: var(--text-tertiary); }
+.ai-history-item:hover .ai-history-delete { opacity: 1; }
+.ai-history-delete:hover { color: var(--danger, #e5484d); }
 .ai-messages { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
 .ai-message { padding: 10px 12px; border-radius: var(--radius-md); font-size: var(--font-size-base); line-height: 1.6; }
 .ai-message.user { background: var(--bg-tertiary); }

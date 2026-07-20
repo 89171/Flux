@@ -321,6 +321,15 @@ export function MindmapEditor({
     me.init(currentData)
     instanceRef.current = me
 
+    const handleCanvasDoubleClick = (event: MouseEvent): void => {
+      // Mind-Elixir already uses double-click on topics and labels for editing.
+      // Only zoom when the blank canvas itself is the event target.
+      if (event.button !== 0 || event.target !== me.map) return
+      event.preventDefault()
+      me.scale(me.scaleVal + me.scaleSensitivity)
+    }
+    me.map.addEventListener('dblclick', handleCanvasDoubleClick)
+
     let isDisposed = false
     let fitFrame = 0
     let secondFitFrame = 0
@@ -395,6 +404,7 @@ export function MindmapEditor({
         onReady?.(null)
         me.bus.removeListener('operation', handleOperation)
         el.removeEventListener('mouseup', checkDirection)
+        me.map.removeEventListener('dblclick', handleCanvasDoubleClick)
         me.destroy()
       } catch {
         // best-effort cleanup on unmount

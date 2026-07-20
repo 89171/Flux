@@ -618,11 +618,30 @@ ${htmlBody}
     const sender = event.sender
     const conversationId = request.conversationId || aiService.generateConversationId()
     const requestWithId: AIRequest = { ...request, conversationId }
+    let createdFilePath: string | null = null
     try {
       for await (const chunk of aiService.generateStream(requestWithId, (toolEvt: AIToolEvent) => {
         if (!sender.isDestroyed()) sender.send(IPC.AI_TOOL_EXECUTED, toolEvt)
+        if (toolEvt.tool === 'create_file' && toolEvt.result?.success && toolEvt.result.filePath) {
+          createdFilePath = toolEvt.result.filePath
+        }
       })) {
         if (!sender.isDestroyed()) sender.send(IPC.AI_STREAM_CHUNK, chunk)
+      }
+      // The AI writes the new file's body directly in the main process (after
+      // the stream), so no FILE_CHANGED_EVENT was emitted for it. Push the
+      // final content to every window — including the sender — so an already-
+      // open (initially empty) editor refreshes without needing a file switch.
+      if (createdFilePath) {
+        try {
+          const { content, mtime } = fsManager.readFileWithMeta(createdFilePath)
+          const payload: FileChangedEvent = { path: createdFilePath, mtime, content }
+          for (const win of BrowserWindow.getAllWindows()) {
+            if (!win.isDestroyed()) win.webContents.send(IPC.FILE_CHANGED_EVENT, payload)
+          }
+        } catch {
+          // Best-effort refresh; the file is already on disk regardless.
+        }
       }
       if (!sender.isDestroyed()) sender.send(IPC.AI_STREAM_DONE, { conversationId })
     } catch (err) {

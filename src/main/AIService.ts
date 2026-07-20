@@ -52,20 +52,16 @@ const FLUX_TOOLS = [
     type: 'function',
     function: {
       name: 'create_file',
-      description: 'Create a new file in the workspace with the given path and content. Supported extensions: .md (markdown), .todo (kanban board), .mmd (mermaid diagram), .puml (plantuml), .excalidraw, .drawio, .mindmap, .bpmn, .dmn.',
+      description: 'Create a new file in the workspace. Only decide the file PATH (with the correct extension); the document body is generated separately and streamed into the file, so do NOT include long content here. Supported extensions: .md (markdown), .todo (kanban board), .mmd (mermaid diagram), .puml (plantuml), .excalidraw, .drawio, .mindmap, .bpmn, .dmn.',
       parameters: {
         type: 'object',
         properties: {
           path: {
             type: 'string',
-            description: 'File path relative to workspace root, e.g. "meeting-notes.md" or "projects/todo.todo"'
-          },
-          content: {
-            type: 'string',
-            description: 'Initial file content'
+            description: 'File path relative to workspace root, e.g. "meeting-notes.md" or "projects/todo.todo". Choose a concise, descriptive name with the correct extension.'
           }
         },
-        required: ['path', 'content']
+        required: ['path']
       }
     }
   }
@@ -84,8 +80,82 @@ const FILE_TOOL_SYSTEM_PROMPT = `You are the file-creation controller for the Fl
 Decide ONLY whether the user's latest message is asking to create, generate, write, or save a new document/file. Examples that MUST trigger create_file: "创建一个Markdown文档…", "帮我生成一个关于X的文件", "写一篇…保存为md", "create a markdown doc about X", "make a todo board for …".
 
 Rules:
-- If it is such a request, you MUST call create_file exactly once. Choose a concise filename relative to the workspace root with the correct extension (.md for markdown/articles, .todo for kanban, .mmd for mermaid, .puml for plantuml, .drawio, .mindmap, .bpmn, .dmn). Put the FULL requested document into the content argument. Do not ask for confirmation.
+- If it is such a request, you MUST call create_file exactly once. Choose a concise filename relative to the workspace root with the correct extension (.md for markdown/articles, .todo for kanban, .mmd for mermaid, .puml for plantuml, .drawio, .mindmap, .bpmn, .dmn). Do NOT include the document body — the content is generated and streamed into the file separately. Do not ask for confirmation.
 - If the message is a normal question or chat that does not ask to create a file, do NOT call any tool and reply with an empty message.`
+
+/**
+ * Heuristic: does the user's message explicitly ask to create/generate/save a
+ * document? Used only as a fallback trigger — when the model's `auto` tool
+ * probe declines but the intent is unmistakable, we re-probe with the tool
+ * forced. Deliberately keyed on creation *verbs* (not nouns) to avoid firing
+ * on questions like "生成的文件在哪" / "how do I create a file".
+ */
+function looksLikeCreateRequest(text: string): boolean {
+  if (!text) return false
+  const t = text.toLowerCase()
+  // English: a creation verb reasonably near a document/file/diagram noun.
+  const enVerb = /\b(create|generate|make|build|draft|compose|write|save)\b/.test(t)
+  const enNoun =
+    /\b(file|doc|document|note|markdown|md|mindmap|mind map|kanban|todo|board|diagram|chart|flowchart|mermaid|plantuml|drawio|bpmn|dmn)\b/.test(
+      t
+    )
+  if (enVerb && enNoun) return true
+  // Chinese: creation verbs, usually self-sufficient (e.g. 创建一个思维导图).
+  if (/(创建|新建|生成|做一个|做一份|做一张|建一个|画一个|画一张|画个|帮我写|写一篇|写一个|保存为|存为|导出为)/.test(text)) {
+    return true
+  }
+  return false
+}
+
+/**
+ * Parse a tool call's `arguments` JSON, tolerating truncation. When a long
+ * document overruns the model's token budget the returned string is cut off
+ * mid-value, so plain JSON.parse throws "Unterminated string in JSON". In
+ * that case we salvage `path` and the partial `content` with a lenient scan
+ * so the user still gets a (near-complete) file instead of a hard error.
+ */
+function parseToolArguments(raw: string): { path?: string; content?: string; truncated: boolean } {
+  try {
+    const obj = JSON.parse(raw) as Record<string, unknown>
+    return {
+      path: typeof obj.path === 'string' ? obj.path : undefined,
+      content: typeof obj.content === 'string' ? obj.content : undefined,
+      truncated: false
+    }
+  } catch {
+    // Salvage: pull "path" (short, almost always intact) then take everything
+    // from "content":" to the end, undoing JSON string escaping and dropping a
+    // dangling backslash left by the cut.
+    const pathMatch = raw.match(/"path"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+    const path = pathMatch ? decodeJsonStringBody(pathMatch[1]) : undefined
+    let content: string | undefined
+    const contentKey = raw.match(/"content"\s*:\s*"/)
+    if (contentKey && contentKey.index !== undefined) {
+      let body = raw.slice(contentKey.index + contentKey[0].length)
+      // If content wasn't the truncated field, trim at its real closing quote.
+      const closer = body.match(/(?<!\\)"\s*[,}]\s*$/)
+      if (closer && closer.index !== undefined) body = body.slice(0, closer.index)
+      body = body.replace(/\\$/, '') // drop trailing lone backslash from the cut
+      content = decodeJsonStringBody(body)
+    }
+    return { path, content, truncated: true }
+  }
+}
+
+/** Decode the body of a JSON string literal (no surrounding quotes). */
+function decodeJsonStringBody(body: string): string {
+  try {
+    return JSON.parse(`"${body.replace(/\n/g, '\\n').replace(/\r/g, '\\r')}"`) as string
+  } catch {
+    // Best-effort manual unescape when even that fails.
+    return body
+      .replace(/\\n/g, '\n')
+      .replace(/\\r/g, '\r')
+      .replace(/\\t/g, '\t')
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\')
+  }
+}
 
 function normalizeWorkspacePath(path: string): string {
   return path.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
@@ -308,6 +378,10 @@ export class AIService {
     const abortController = new AbortController()
     this.activeRequests.set(conversationId, abortController)
 
+    // Set when the tool probe asks to create a file; the streamed body is
+    // written here once generation completes.
+    let createFileTarget: { path: string; format: NoteFormat } | null = null
+
     try {
       // Tool-calling pass: for OpenAI-compatible providers, do a quick
       // non-streaming call with tools to detect if the AI wants to create
@@ -327,27 +401,45 @@ export class AIService {
           { role: 'system', content: FILE_TOOL_SYSTEM_PROMPT },
           ...apiMessages.filter((m) => m.role !== 'system')
         ]
-        const toolsResult = await this.callAIWithTools(probeMessages, abortController.signal)
-        if (toolsResult.toolCalls && toolsResult.toolCalls.length > 0) {
-          apiMessages = [
-            ...apiMessages,
-            {
-              role: 'assistant',
-              content: toolsResult.content || null,
-              tool_calls: toolsResult.toolCalls
-            }
-          ]
-          for (const tc of toolsResult.toolCalls) {
-            let args: Record<string, unknown> = {}
-            let result: { success: boolean; filePath?: string; error?: string }
-            try {
-              args = JSON.parse(tc.function.arguments) as Record<string, unknown>
-              result = await this.executeToolCall(tc.function.name, args)
-            } catch (err) {
-              result = { success: false, error: err instanceof Error ? err.message : String(err) }
-            }
-            onToolExecuted({ conversationId, tool: tc.function.name, args, result })
-            apiMessages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) })
+        let toolsResult = await this.callAIWithTools(probeMessages, abortController.signal)
+        // Fallback: the model declined the tool but the user clearly asked to
+        // create something — re-probe with the tool forced so the file is
+        // actually created instead of silently degrading to a chat reply.
+        if (
+          (!toolsResult.toolCalls || toolsResult.toolCalls.length === 0) &&
+          looksLikeCreateRequest(request.prompt)
+        ) {
+          console.log('[AIService] auto probe declined but create-intent detected — forcing create_file')
+          toolsResult = await this.callAIWithTools(probeMessages, abortController.signal, true)
+        }
+        const createCall = toolsResult.toolCalls?.find((tc) => tc.function.name === 'create_file')
+        if (createCall) {
+          // The tool call now carries only the filename (see FLUX_TOOLS) —
+          // tiny, so it can't truncate. The document body is produced by the
+          // streaming pass below and written to the file, which means long
+          // documents stream in cleanly instead of overflowing a single JSON
+          // response (the old cause of "Unterminated string in JSON").
+          const parsed = parseToolArguments(createCall.function.arguments)
+          if (parsed.path && this.fsManager) {
+            const uniquePath = getUniqueWorkspacePath(parsed.path, (c) => this.fsManager!.exists(c))
+            const created = this.fsManager.createFile(uniquePath, '')
+            const targetFormat = this.fsManager.detectFormat(uniquePath)
+            createFileTarget = { path: created.path, format: targetFormat }
+            onToolExecuted({
+              conversationId,
+              tool: 'create_file',
+              args: { path: created.path },
+              result: { success: true, filePath: created.path }
+            })
+            // Swap to the format-specific prompt so the streamed body matches
+            // the new file's type (mindmap outline, mermaid syntax, etc.).
+            const targetAdapter = this.pluginManager.getAIAdapter(targetFormat)
+            const contentPrompt =
+              targetAdapter?.systemPrompt || this.getDefaultSystemPrompt(targetFormat)
+            apiMessages = [
+              { role: 'system', content: contentPrompt },
+              ...apiMessages.filter((m) => m.role === 'user' || m.role === 'assistant')
+            ]
           }
         }
       }
@@ -358,7 +450,21 @@ export class AIService {
         yield chunk
       }
 
-      const parsedContent = adapter?.parseResponse ? adapter.parseResponse(fullContent) : fullContent
+      // For a streamed file creation, resolve the body against the target
+      // format's adapter (strips ```fences etc.) and write it into the file.
+      const writeAdapter = createFileTarget
+        ? this.pluginManager.getAIAdapter(createFileTarget.format)
+        : adapter
+      const parsedContent = writeAdapter?.parseResponse
+        ? writeAdapter.parseResponse(fullContent)
+        : fullContent
+      if (createFileTarget && this.fsManager && parsedContent.trim()) {
+        try {
+          this.fsManager.writeFile(createFileTarget.path, parsedContent)
+        } catch (err) {
+          console.error('[AIService] failed to write streamed file content:', err)
+        }
+      }
       conversation.messages.push({ role: 'assistant', content: parsedContent, timestamp: Date.now() })
     } finally {
       this.activeRequests.delete(conversationId)
@@ -699,9 +805,16 @@ export class AIService {
 
   private async callAIWithTools(
     messages: AIMessageEntry[],
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    forceCreateFile = false
   ): Promise<AIWithToolsResult> {
     try {
+      // `auto` lets the model decide; when the caller is confident the user
+      // asked to create a file (see looksLikeCreateRequest) we pin the choice
+      // so providers with flaky auto tool-calling (e.g. DeepSeek) still comply.
+      const toolChoice = forceCreateFile
+        ? { type: 'function' as const, function: { name: 'create_file' } }
+        : 'auto'
       const response = await fetch(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -712,7 +825,11 @@ export class AIService {
           model: this.model,
           messages,
           tools: FLUX_TOOLS,
-          tool_choice: 'auto'
+          tool_choice: toolChoice,
+          // The whole document is returned inside the tool call's `arguments`
+          // JSON. Without a high ceiling the model truncates mid-string and
+          // the arguments become unparseable JSON. 8192 is DeepSeek's max.
+          max_tokens: 8192
         }),
         signal
       })
@@ -759,26 +876,6 @@ export class AIService {
       }
       return { content: '' }
     }
-  }
-
-  private async executeToolCall(
-    name: string,
-    args: Record<string, unknown>
-  ): Promise<{ success: boolean; filePath?: string; error?: string }> {
-    if (name === 'create_file') {
-      if (!this.fsManager) return { success: false, error: 'File system not available' }
-      const path = String(args.path ?? '')
-      const content = String(args.content ?? '')
-      if (!path) return { success: false, error: 'path is required' }
-      try {
-        const uniquePath = getUniqueWorkspacePath(path, (candidate) => this.fsManager!.exists(candidate))
-        const created = this.fsManager.createFile(uniquePath, content)
-        return { success: true, filePath: created.path }
-      } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) }
-      }
-    }
-    return { success: false, error: `Unknown tool: ${name}` }
   }
 
   generateMockResponse(messages: AIMessageEntry[]): string {

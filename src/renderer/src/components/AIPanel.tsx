@@ -24,7 +24,9 @@ import {
   Trash2,
   Zap,
   Square,
-  FilePlus
+  FilePlus,
+  Plus,
+  History as HistoryIcon
 } from 'lucide-react'
 import { useAIStore } from '../stores/aiStore'
 import { useFileStore } from '../stores/fileStore'
@@ -60,6 +62,11 @@ export function AIPanel() {
   const addAttachment = useAIStore((s) => s.addAttachment)
   const clearAttachments = useAIStore((s) => s.clearAttachments)
   const clearMessages = useAIStore((s) => s.clearMessages)
+  const sessions = useAIStore((s) => s.sessions)
+  const currentSessionId = useAIStore((s) => s.currentSessionId)
+  const newConversation = useAIStore((s) => s.newConversation)
+  const switchConversation = useAIStore((s) => s.switchConversation)
+  const deleteConversation = useAIStore((s) => s.deleteConversation)
 
   const currentFile = useFileStore((s) => s.currentFile)
   const currentContent = useFileStore((s) => s.currentContent)
@@ -70,6 +77,7 @@ export function AIPanel() {
 
   const [input, setInput] = useState('')
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
+  const [showHistory, setShowHistory] = useState(false)
   const handledToolMessageKeysRef = useRef<Set<string> | null>(null)
 
   const handleCopy = useCallback((content: string, idx: number) => {
@@ -255,6 +263,73 @@ export function AIPanel() {
 
   return (
     <div className="ai-panel">
+      {/* Header: new chat + history */}
+      <div className="ai-panel-header">
+        <button
+          className="btn-icon"
+          onClick={newConversation}
+          title="New chat"
+          style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+        >
+          <Plus size={14} />
+          <span style={{ fontSize: 'var(--font-size-xs)' }}>New chat</span>
+        </button>
+        <div style={{ position: 'relative' }}>
+          <button
+            className="btn-icon"
+            onClick={() => setShowHistory((v) => !v)}
+            title="Chat history"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              color: showHistory ? 'var(--accent)' : undefined
+            }}
+          >
+            <HistoryIcon size={14} />
+            <span style={{ fontSize: 'var(--font-size-xs)' }}>History</span>
+          </button>
+          {showHistory && (
+            <>
+              {/* click-away backdrop */}
+              <div
+                onClick={() => setShowHistory(false)}
+                style={{ position: 'fixed', inset: 0, zIndex: 40 }}
+              />
+              <div className="ai-history-dropdown">
+                {sessions.length === 0 ? (
+                  <div className="ai-history-empty">No saved chats yet</div>
+                ) : (
+                  sessions.map((s) => (
+                    <div
+                      key={s.id}
+                      className={`ai-history-item${s.id === currentSessionId ? ' active' : ''}`}
+                      onClick={() => {
+                        switchConversation(s.id)
+                        setShowHistory(false)
+                      }}
+                      title={s.title}
+                    >
+                      <span className="ai-history-title">{s.title}</span>
+                      <button
+                        className="btn-icon ai-history-delete"
+                        title="Delete chat"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          deleteConversation(s.id)
+                        }}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
       {/* Messages area */}
       {messages.length === 0 ? (
         /* Empty state */
@@ -282,16 +357,16 @@ export function AIPanel() {
       ) : (
         /* Message list */
         <div className="ai-messages">
-          {/* Clear conversation */}
+          {/* Delete current conversation */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
             <button
               className="btn-icon"
               style={{ fontSize: 'var(--font-size-xs)', gap: 4, display: 'flex', alignItems: 'center' }}
               onClick={clearMessages}
-              title="Clear conversation"
+              title="Delete this conversation"
             >
               <Trash2 size={12} />
-              <span>Clear conversation</span>
+              <span>Delete</span>
             </button>
           </div>
 

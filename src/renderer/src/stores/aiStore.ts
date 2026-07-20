@@ -1,12 +1,24 @@
 import { create } from 'zustand'
 import type { AIMessage, AIToolEvent, AIRequest } from '@shared/types'
 
+/** A saved chat session shown in the history list. */
+export interface ChatSession {
+  id: string
+  title: string
+  messages: AIMessage[]
+  updatedAt: number
+}
+
 interface AIState {
   isGenerating: boolean
   conversationId: string | null
   messages: AIMessage[]
   error: string | null
   isPanelOpen: boolean
+  /** Persisted list of past chats, newest first. */
+  sessions: ChatSession[]
+  /** Id of the chat currently shown; also used as the AI conversationId. */
+  currentSessionId: string | null
   /** True while the current generation has already created a file via tool call. */
   hasActiveFileCreation: boolean
   /** Accumulated text from the current streaming response. Empty when
@@ -22,6 +34,12 @@ interface AIState {
   addAttachment: (attachment: { type: 'file' | 'image' | 'audio'; path: string; name: string }) => void
   clearAttachments: () => void
   clearMessages: () => void
+  /** Start a fresh chat (current one is already saved in `sessions`). */
+  newConversation: () => void
+  /** Load a saved chat into view. */
+  switchConversation: (id: string) => void
+  /** Remove a saved chat; resets to a fresh chat if it was the active one. */
+  deleteConversation: (id: string) => void
   transcribe: (audioPath: string) => Promise<string | null>
 }
 
@@ -29,12 +47,52 @@ interface AIState {
  *  can cancel listener registration without storing it in React state. */
 let streamCleanup: (() => void) | null = null
 
+const SESSIONS_KEY = 'flux:ai:sessions'
+const MAX_SESSIONS = 50
+
+function loadSessions(): ChatSession[] {
+  try {
+    const raw = localStorage.getItem(SESSIONS_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? (parsed as ChatSession[]) : []
+  } catch {
+    return []
+  }
+}
+
+function persistSessions(sessions: ChatSession[]): void {
+  try {
+    localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions.slice(0, MAX_SESSIONS)))
+  } catch {
+    // Quota exceeded or storage unavailable — history is best-effort.
+  }
+}
+
+function deriveTitle(messages: AIMessage[]): string {
+  const firstUser = messages.find((m) => m.role === 'user')
+  const text = (firstUser?.content || '').trim().replace(/\s+/g, ' ')
+  if (!text) return 'New chat'
+  return text.length > 40 ? `${text.slice(0, 40)}…` : text
+}
+
+function newSessionId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
+  } catch {
+    /* fall through */
+  }
+  return `sess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
 export const useAIStore = create<AIState>((set, get) => ({
   isGenerating: false,
   conversationId: null,
   messages: [],
   error: null,
   isPanelOpen: false,
+  sessions: loadSessions(),
+  currentSessionId: null,
   hasActiveFileCreation: false,
   streamingContent: '',
   attachments: [],
@@ -43,18 +101,23 @@ export const useAIStore = create<AIState>((set, get) => ({
   closePanel: () => set({ isPanelOpen: false }),
 
   generate: async (prompt, format, context) => {
+    // Ensure the chat has a stable id so its messages persist to history
+    // under one session (and the AI keeps conversation continuity).
+    const sessionId = get().currentSessionId || newSessionId()
     set({
       isGenerating: true,
       error: null,
       hasActiveFileCreation: false,
-      streamingContent: ''
+      streamingContent: '',
+      currentSessionId: sessionId,
+      conversationId: sessionId
     })
     try {
       const request: AIRequest = {
         prompt,
         format,
         context,
-        conversationId: get().conversationId || undefined,
+        conversationId: sessionId,
         attachments: get().attachments.length > 0 ? get().attachments : undefined
       }
       const userMsg: AIMessage = { role: 'user', content: prompt, timestamp: Date.now() }
@@ -137,7 +200,54 @@ export const useAIStore = create<AIState>((set, get) => ({
 
   addAttachment: (attachment) => set((state) => ({ attachments: [...state.attachments, attachment] })),
   clearAttachments: () => set({ attachments: [] }),
-  clearMessages: () => set({ messages: [], conversationId: null }),
+  clearMessages: () => {
+    // "Clear" = discard the current chat entirely (also drop it from history).
+    const id = get().currentSessionId
+    if (id) {
+      const sessions = get().sessions.filter((s) => s.id !== id)
+      persistSessions(sessions)
+      set({ sessions })
+    }
+    set({ messages: [], conversationId: null, currentSessionId: null, streamingContent: '', error: null })
+  },
+
+  newConversation: () => {
+    // The current chat is already saved in `sessions` via the subscriber,
+    // so just reset the view to a blank chat.
+    if (get().isGenerating) get().cancelGenerate()
+    set({
+      messages: [],
+      conversationId: null,
+      currentSessionId: null,
+      streamingContent: '',
+      hasActiveFileCreation: false,
+      error: null
+    })
+  },
+
+  switchConversation: (id) => {
+    const session = get().sessions.find((s) => s.id === id)
+    if (!session) return
+    if (get().isGenerating) get().cancelGenerate()
+    set({
+      messages: session.messages,
+      conversationId: session.id,
+      currentSessionId: session.id,
+      streamingContent: '',
+      hasActiveFileCreation: false,
+      error: null
+    })
+  },
+
+  deleteConversation: (id) => {
+    const sessions = get().sessions.filter((s) => s.id !== id)
+    persistSessions(sessions)
+    set({ sessions })
+    // If the open chat was deleted, reset to a fresh one.
+    if (get().currentSessionId === id) {
+      set({ messages: [], conversationId: null, currentSessionId: null, streamingContent: '', error: null })
+    }
+  },
   transcribe: async (audioPath) => {
     try {
       const result = await window.flux.ai.transcribe(audioPath)
@@ -150,3 +260,21 @@ export const useAIStore = create<AIState>((set, get) => ({
     }
   }
 }))
+
+// Auto-save the active chat into the persisted history whenever its messages
+// change. Runs on message add, assistant completion, and tool results. The
+// guard keeps the follow-up `sessions` update from re-triggering itself.
+useAIStore.subscribe((state, prev) => {
+  if (state.messages === prev.messages && state.currentSessionId === prev.currentSessionId) return
+  const { currentSessionId, messages, sessions } = state
+  if (!currentSessionId || messages.length === 0) return
+  const meta: ChatSession = {
+    id: currentSessionId,
+    title: deriveTitle(messages),
+    messages,
+    updatedAt: Date.now()
+  }
+  const next = [meta, ...sessions.filter((s) => s.id !== currentSessionId)]
+  persistSessions(next)
+  useAIStore.setState({ sessions: next })
+})
